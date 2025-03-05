@@ -13,40 +13,54 @@
 - 시장 지표, 추천 비중, 조정 이유 출력
 
 ## Installation
-프로그램을 실행하려면 아래 Python 라이브러리를 설치해야 합니다:
+프로그램을 실행하려면 아래 Python 라이브러리를 설치해야 합니다.
+
 ```bash
 pip install yfinance pandas requests scipy tabulate
-Usage
-저장소를 클론합니다:
-bash
+
+## Usage
+저장소를 클론합니다.
+
+```bash
 git clone https://github.com/yourusername/your-repo-name.git
-프로젝트 디렉토리로 이동합니다:
-bash
+
+프로젝트 디렉토리로 이동합니다.
+
+```bash
 cd your-repo-name
-프로그램을 실행합니다:
-bash
+
+프로그램을 실행합니다.
+
+```bash
 python portfolio_adjustment.py
+
 프로그램은 시장 지표, 추천 포트폴리오 비중, 조정 이유를 출력합니다.
-Logic
+
+## Logic
 포트폴리오 비중 조정은 아래 로직을 따릅니다:
-Fear & Greed Index:
+
+### Fear & Greed Index:
 ≤ 25: TSLL 비중 10% 증가 (매수 신호)
 ≥ 75: TSLL 비중 10% 감소 (매도 신호)
-RSI:
+### RSI:
 < 30: TSLL 비중 10% 증가 (매수 신호)
 70: TSLL 비중 10% 감소 (매도 신호)
-Bollinger Bands:
+### Bollinger Bands:
 주가가 하단 밴드 미만: TSLL 비중 10% 증가 (매수 신호)
 주가가 상단 밴드 초과: TSLL 비중 10% 감소 (매도 신호)
-Volume Change:
+### Volume Change:
 거래량이 10% 이상 증가: TSLL 비중 10% 증가 (매수 신호)
 거래량이 10% 이상 감소: TSLL 비중 10% 감소 (매도 신호)
-MACD:
+### MACD:
 MACD가 신호선을 상향 돌파하고 신호선이 0 미만: TSLL 비중 10% 증가 (매수 신호)
 MACD가 신호선을 하향 돌파하고 신호선이 0 초과: TSLL 비중 10% 감소 (매도 신호)
+
 최종 비중은 0%에서 100% 사이로 제한됩니다.
-Example Output
-프로그램 실행 시 다음과 같은 출력이 표시됩니다:
+
+## Example Output
+프로그램 실행 시 다음과 같은 출력이 표시됩니다.
+
+```bash
 ### Market Indicators (as of 2023-10-05)
 ╒═════════════════════════╤═══════╤═════════════╕
 │ Indicator               │ Value │ Trend/Notes │
@@ -78,9 +92,6 @@ Example Output
 ### Adjustment Reasons
 - Buy Signal: RSI < 30 or MACD > MACD Signal
 - Fear & Greed Index ≤ 25: Extreme Fear
-Disclaimer
+
+## Disclaimer
 이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
-
----
-
-이 `README.md` 파일은 프로그램의 목적과 기능을 명확히 전달하며, 설치 및 사용 방법을 단계별로 안내합니다. 또한, 포트폴리오 조정 로직과 출력 예시를 포함하여 사용자가 프로그램을 쉽게 이해하고 활용할 수 있도록 돕습니다. GitHub에 업로드 시 `yourusername`과 `your-repo-name`을 실제 사용자 이름과 저장소 이름으로 변경하세요.
