@@ -24,16 +24,19 @@ pip install yfinance pandas requests scipy tabulate
 
 ```bash
 git clone https://github.com/yourusername/your-repo-name.git
+```
 
 프로젝트 디렉토리로 이동합니다.
 
 ```bash
 cd your-repo-name
+```
 
 프로그램을 실행합니다.
 
 ```bash
 python portfolio_adjustment.py
+```
 
 프로그램은 시장 지표, 추천 포트폴리오 비중, 조정 이유를 출력합니다.
 
@@ -93,6 +96,7 @@ MACD가 신호선을 하향 돌파하고 신호선이 0 초과: TSLL 비중 10% 
 ### Adjustment Reasons
 - Buy Signal: RSI < 30 or MACD > MACD Signal
 - Fear & Greed Index ≤ 25: Extreme Fear
+```
 
 ## Disclaimer
 이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
