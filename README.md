@@ -17,6 +17,7 @@
 
 ```bash
 pip install yfinance pandas requests scipy tabulate
+```
 
 ## Usage
 저장소를 클론합니다.
