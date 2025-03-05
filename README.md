@@ -1,5 +1,3 @@
-아래는 사용자가 요청한 주식 데이터 분석 및 포트폴리오 조정 프로그램을 GitHub에 공개하기 위한 README.md 파일입니다. 이 파일은 프로그램의 목적, 주요 기능, 설치 방법, 사용 방법, 로직, 사용 예시, 그리고 면책 조항을 포함하고 있습니다.
-
 # TSLA & TSLL Portfolio Adjustment Program
 
 ## Overview
