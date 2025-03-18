@@ -9,7 +9,7 @@ from tabulate import tabulate
 import json
 import csv
 
-# 백테스트 결과의 최적 파라미터 파일 적용
+# 백테스트 결과의 최적 파라미터 파일 적용 (optimal_params.json)
 
 # 초기 설정
 portfolio_value = 100000  # 초기 자산 $100,000
