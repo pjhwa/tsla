@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 
-# 백테스트 결과 디버깅
+# 백테스트 결과 디버깅 (임시)
 
 # 초기 설정
 initial_portfolio_value = 100000  # 초기 자산 $100,000
