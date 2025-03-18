@@ -10,6 +10,8 @@ from tabulate import tabulate
 # 초기 설정
 portfolio_value = 100000  # 초기 자산 $100,000
 current_tsll_weight = 0.0  # TSLL 비중 0%로 시작
+w_buy = 1.5  # 최적 매수 가중치
+w_sell = 1.0  # 최적 매도 가중치
 
 ### 데이터 수집 함수 ###
 def get_fear_greed_index():
@@ -79,53 +81,45 @@ def get_rsi_trend(rsi_series, window=10):
     return "Stable"
 
 ### 전략 및 포트폴리오 관리 ###
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, weekly_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band):
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band):
     base_weight = current_tsll_weight
     reasons = []
 
-    sma_long = sma200 if not pd.isna(sma200) else sma50
+    # 매수 조건 정의
+    buy_conditions = {
+        "Fear & Greed Index ≤ 25": fear_greed <= 25,
+        "Daily RSI < 30": daily_rsi < 30,
+        "MACD > MACD Signal and MACD Signal < 0": (macd > macd_signal) and (macd_signal < 0),
+        "Volume Change > 10%": volume_change > 0.1,
+        "Close < Lower Bollinger Band": close < lower_band,
+        "RSI Increasing and Close > SMA200": (daily_rsi_trend == "Increasing") and (close > sma200)
+    }
 
-    # RSI 및 MACD 판단 기준
-    if daily_rsi < 30 or (macd > macd_signal and macd_signal < 0):
-        base_weight += 0.1
-        reasons.append("Buy Signal: RSI < 30 or MACD > MACD Signal")
-    elif daily_rsi > 70 or (macd < macd_signal and macd_signal > 0):
-        base_weight -= 0.1
-        reasons.append("Sell Signal: RSI > 70 or MACD < MACD Signal")
+    # 매도 조건 정의
+    sell_conditions = {
+        "Fear & Greed Index ≥ 75": fear_greed >= 75,
+        "Daily RSI > 70": daily_rsi > 70,
+        "MACD < MACD Signal and MACD Signal > 0": (macd < macd_signal) and (macd_signal > 0),
+        "Volume Change < -10%": volume_change < -0.1,
+        "Close > Upper Bollinger Band": close > upper_band,
+        "RSI Decreasing and Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200)
+    }
 
-    # Fear & Greed Index 반영
-    if fear_greed <= 25:
-        base_weight += 0.1
-        reasons.append("Fear & Greed Index ≤ 25: Extreme Fear")
-    elif fear_greed >= 75:
-        base_weight -= 0.1
-        reasons.append("Fear & Greed Index ≥ 75: Extreme Greed")
+    # 충족된 매수 및 매도 조건 기록
+    buy_reasons = [condition for condition, is_true in buy_conditions.items() if is_true]
+    sell_reasons = [condition for condition, is_true in sell_conditions.items() if is_true]
 
-    # 거래량 변화 반영
-    if volume_change > 0.1:
-        base_weight += 0.1
-        reasons.append("Volume Increase > 10%: Buy Signal")
-    elif volume_change < -0.1:
-        base_weight -= 0.1
-        reasons.append("Volume Decrease > 10%: Sell Signal")
+    # 비중 조정
+    buy_adjustment = w_buy * len(buy_reasons) * 0.1  # 매수 신호 수에 가중치 적용
+    sell_adjustment = w_sell * len(sell_reasons) * 0.1  # 매도 신호 수에 가중치 적용
+    target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
-    # Bollinger Bands 반영
-    if close < lower_band:
-        base_weight += 0.1
-        reasons.append("Price < Lower Bollinger Band: Buy Signal")
-    elif close > upper_band:
-        base_weight -= 0.1
-        reasons.append("Price > Upper Bollinger Band: Sell Signal")
+    # 이유 기록
+    if buy_reasons:
+        reasons.append(f"Buy Signal: {', '.join(buy_reasons)}")
+    if sell_reasons:
+        reasons.append(f"Sell Signal: {', '.join(sell_reasons)}")
 
-    # 추세 반영
-    if daily_rsi_trend == "Increasing" and close > sma_long:
-        base_weight += 0.1
-        reasons.append("Trend: RSI Increasing and Close > SMA200")
-    elif daily_rsi_trend == "Decreasing" and close < sma_long:
-        base_weight -= 0.1
-        reasons.append("Trend: RSI Decreasing and Close < SMA200")
-
-    target_weight = max(0.0, min(base_weight, 1.0))
     return target_weight, reasons
 
 def adjust_portfolio(target_tsll_weight):
@@ -140,6 +134,7 @@ def adjust_portfolio(target_tsll_weight):
 
 ### 실행 함수 ###
 def analyze_and_recommend():
+    print("데이터 로드 중...")
     fear_greed = get_fear_greed_index()
     tsla_df = get_stock_data("TSLA")
     tsll_df = get_stock_data("TSLL")
@@ -185,7 +180,7 @@ def analyze_and_recommend():
     print(f"- **TSLL Close**: ${tsll_close:.2f}")
 
     # 포트폴리오 비중 계산
-    target_tsll_weight, reasons = get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, "Stable", close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band)
+    target_tsll_weight, reasons = get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band)
     target_tsla_weight = 1 - target_tsll_weight
 
     # 추천 비중 표시
