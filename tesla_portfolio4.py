@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from itertools import product
 
-# 백테스트 코드: 2년 과거 데이터 활용 
+# 백테스트 코드: 2년 과거 데이터 활용 (임시)
 
 # 초기 포트폴리오 가치 설정
 initial_portfolio_value = 100000
