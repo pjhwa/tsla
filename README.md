@@ -84,7 +84,7 @@ $ ./TSLA_Portfolio.py
 ╒══════════════════════╤═════════╤═══════════════╕
 │ Indicator            │ Value   │ Trend/Notes   │
 ╞══════════════════════╪═════════╪═══════════════╡
-│ Fear & Greed Index   │ 22.06   │ -             │
+│ Fear & Greed Index   │ 22.54   │ -             │
 ├──────────────────────┼─────────┼───────────────┤
 │ Daily RSI            │ 31.11   │ Increasing    │
 ├──────────────────────┼─────────┼───────────────┤
@@ -108,15 +108,19 @@ $ ./TSLA_Portfolio.py
 - **TSLL Close**: $8.34
 
 ### Recommended Portfolio Weights
-- **TSLA Weight**: 70%
-- **TSLL Weight**: 30%
+- **TSLA Weight**: 90%
+- **TSLL Weight**: 10%
 
 ### Portfolio Adjustment
- - Buy TSLL: $30000.00
+ - Buy TSLL: $10000.00
 
 ### Adjustment Reasons
-- Buy Signal: Fear & Greed Index ≤ 25, Volume Change > 10%
+- Buy Signal: Fear & Greed Index ≤ 50
 ```
+
+## 백테스트
+과거 데이터를 기준으로 각 지표에 대한 최적의 파라미터를 찾기 위한 백테스트를 Portfolio_backtest.py로 수행할 수 있습니다. 
+도출된 최적의 파라미터는 optimal_params.json 파일로 저장되고, TSLA_Portfolio.py 실행시 읽어들입니다.
 
 ## Disclaimer
 이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
