@@ -3,18 +3,15 @@ Portfolio_backtest.py 실행결과는 다음과 같습니다.
 
 ```
 $ ./Portfolio_backtest.py
-데이터 로드 중...
-지표 계산 중...
-백테스팅 및 가중치 최적화 중...
+최적 파라미터: {'daily_rsi_buy': 30, 'daily_rsi_sell': 75, 'weekly_rsi_buy': 35, 'weekly_rsi_sell': 65, 'fg_buy': 50, 'fg_sell': 70, 'volume_change_buy': 0.15, 'volume_change_sell': -0.15, 'w_buy': 1.0, 'w_sell': 2.0}
+최종 포트폴리오 가치: $181341.07
+최적 파라미터가 optimal_params.json에 저장되었습니다.
 
-### 최적화 결과
-- 최적 매수 가중치 (w_buy): 1.5
-- 최적 매도 가중치 (w_sell): 1.0
-- 최종 포트폴리오 가치: $347418.96
-- 총 수익률: 247.42%
+$ cat optimal_params.json
+{"daily_rsi_buy": 30, "daily_rsi_sell": 75, "weekly_rsi_buy": 35, "weekly_rsi_sell": 65, "fg_buy": 50, "fg_sell": 70, "volume_change_buy": 0.15, "volume_change_sell": -0.15, "w_buy": 1.0, "w_sell": 2.0}
 ```
 
-이 결과는 Portfolio_backtest.py 파이썬 스크립트가 과거 데이터를 이용해 백테스팅을 수행하고, 매수 및 매도 신호에 적용할 최적의 가중치를 계산한 후, 그 결과로 포트폴리오의 성과를 도출한 것입니다. 각 항목의 의미를 아래에서 자세히 설명합니다.
+이 결과는 Portfolio_backtest.py 파이썬 스크립트가 과거 데이터를 이용해 백테스팅을 수행하고, 매수 및 매도 신호에 적용할 최적의 가중치를 계산한 후, 그 결과로 포트폴리오의 성과를 도출한 것입니다. 수행 결과로 도출된 최적의 파라미터는 optimal_params.json 파일에 저장됩니다. 각 항목의 의미를 아래에서 자세히 설명합니다.
 
 ### 최적 매수 가중치 (w_buy): 1.5
 의미: 매수 신호가 발생했을 때 포트폴리오에서 TSLL(Tesla 관련 레버리지 ETF)의 비중을 기본 조정량(예: 0.1%)에 1.5배를 곱한 만큼 증가시킵니다. 즉, 매수 신호가 강력할 때 더 공격적으로 투자하는 전략을 나타냅니다.
