@@ -21,19 +21,19 @@ pip install yfinance pandas requests scipy tabulate
 저장소를 클론합니다.
 
 ```bash
-git clone https://github.com/yourusername/your-repo-name.git
+git clone https://github.com/pjhwa/tsla.git
 ```
 
 프로젝트 디렉토리로 이동합니다.
 
 ```bash
-cd your-repo-name
+cd tsla
 ```
 
 프로그램을 실행합니다.
 
 ```bash
-python portfolio_adjustment.py
+python TSLA_Portfolio.py
 ```
 
 프로그램은 시장 지표, 추천 포트폴리오 비중, 조정 이유를 출력합니다.
