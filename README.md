@@ -14,7 +14,6 @@
 프로그램을 실행하려면 아래 Python 라이브러리를 설치해야 합니다.
 
 ```bash
-pip install yfinance pandas requests scipy tabulate
 pip install pandas numpy yfinance requests deap bayesian-optimization tabulate scipy
 ```
 백테스트 프로그램인 `Portfolio_backtest.py` 수행 시에 필요한 라이브러리도 함께 설치합니다.
