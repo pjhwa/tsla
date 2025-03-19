@@ -16,25 +16,36 @@
 
 ```bash
 pip install pandas numpy deap bayesian-optimization
+```
+
 Python 3.6 이상 버전이 설치되어 있는지 확인하세요.
-사용 방법
+
+## 사용 방법
+
 백테스트 프로그램을 실행하고 활용하려면 아래 단계를 따라 주세요. 각 단계는 명확히 구분되어 있으며, 필요한 명령어와 준비 사항을 포함합니다.
+
 1. 필요한 라이브러리 설치
-프로그램을 실행하려면 먼저 Python 환경에 필수 라이브러리를 설치해야 합니다. 아래 명령어를 터미널에서 실행하세요:
-bash
+프로그램을 실행하려면 먼저 Python 환경에 필수 라이브러리를 설치해야 합니다. 아래 명령어를 터미널에서 실행하세요.
+
+```bash
 pip install pandas numpy deap bayesian-optimization
+```
 주의: Python 3.6 이상 버전이 설치되어 있어야 합니다. 버전을 확인하려면 python --version 명령어를 사용하세요.
+
 2. 데이터 파일 준비
 백테스트에 필요한 과거 데이터를 CSV 형식으로 준비합니다. 다음 파일과 열이 필요합니다:
-TSLA-history-2y.csv: TSLA 주식 데이터
-열: Date, Open, High, Low, Close, Volume
-TSLL-history-2y.csv: TSLL 주식 데이터
-열: Date, Open, High, Low, Close, Volume
-fear_greed_2years.csv: Fear and Greed Index 데이터
-열: date, y (Fear and Greed Index 값)
-데이터 확인 사항:
+
+- TSLA-history-2y.csv: TSLA 주식 데이터
+  - 열: Date, Open, High, Low, Close, Volume
+- TSLL-history-2y.csv: TSLL 주식 데이터
+  - 열: Date, Open, High, Low, Close, Volume
+- fear_greed_2years.csv: Fear and Greed Index 데이터
+  - 열: date, y (Fear and Greed Index 값)
+
+### 데이터 확인 사항
 날짜 형식이 일관적인지 확인하세요 (예: YYYY-MM-DD).
 주요 열에 누락값이 없어야 합니다.
+
 3. 프로그램 실행
 준비가 완료되면 아래 명령어로 백테스트 프로그램을 실행합니다:
 bash
