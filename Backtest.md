@@ -2,6 +2,8 @@
 Portfolio_backtest.py 실행결과는 다음과 같습니다.
 
 ```
+$ pip install deap bayesian-optimization
+
 $ ./Portfolio_backtest.py
 최적 파라미터: {'daily_rsi_buy': 30, 'daily_rsi_sell': 75, 'weekly_rsi_buy': 35, 'weekly_rsi_sell': 65, 'fg_buy': 50, 'fg_sell': 70, 'volume_change_buy': 0.15, 'volume_change_sell': -0.15, 'w_buy': 1.0, 'w_sell': 2.0}
 최종 포트폴리오 가치: $181341.07
