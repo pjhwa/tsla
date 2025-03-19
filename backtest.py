@@ -6,6 +6,8 @@ import random
 from deap import base, creator, tools, algorithms
 from bayes_opt import BayesianOptimization
 
+# 최적 파라미터 도출을 위해 그리드서치, 유전알고리즘, 베이지안알고리즘을 순차적으로 백테스트함
+
 # 초기 설정
 initial_portfolio_value = 100000
 
