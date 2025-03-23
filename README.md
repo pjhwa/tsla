@@ -1,4 +1,4 @@
-# TSLA/TSLL Portfolio Management and Optimization Program
+# Portfolio Pulse
 
 ## Overview
 이 프로그램은 TSLA와 TSLL 주식으로 구성된 포트폴리오를 관리하며, 다양한 시장 지표를 분석하여 수익률을 극대화할 수 있는 최적의 비중 조정을 제안합니다. Fear & Greed Index, RSI, MACD, 볼린저 밴드 등의 지표를 활용해 동적으로 포트폴리오를 조정하며, 거래 내역이 없는 경우 초기 자산 $100,000을 기준으로 추천을 제공합니다.
@@ -39,7 +39,7 @@ pip install yfinance pandas requests scipy tabulate
      ```
    - 다음 명령어로 프로그램을 실행합니다.
      ```bash
-     python portfolio_manager.py
+     python3 portfolio_pulse.py
      ```
    - 프로그램은 실시간 주가 데이터와 시장 지표를 분석하여 포트폴리오 조정 제안을 출력합니다.
 
@@ -166,7 +166,7 @@ Buy Signals:
 
 ## 백테스트
 과거 데이터를 기준으로 각 지표에 대한 최적의 파라미터를 찾기 위한 백테스트를 `Portfolio_backtest.py`로 수행할 수 있습니다. 
-도출된 최적의 파라미터는 `optimal_params.json` 파일로 저장되고, `portfolio_manager.py` 실행 시 읽어들입니다.
+도출된 최적의 파라미터는 `optimal_params.json` 파일로 저장되고, `portfolio_pulse.py` 실행 시 읽어들입니다.
 
 ## Disclaimer
 이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
