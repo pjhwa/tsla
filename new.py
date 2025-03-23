@@ -122,22 +122,34 @@ def load_transactions(file_path="transactions.txt"):
     """transactions.txt 파일을 읽어 현재 보유 주식 수와 초기 투자액을 계산합니다."""
     if not os.path.exists(file_path):
         print("transactions.txt 파일이 없습니다. 초기 자산으로 계산을 진행합니다.")
-        return {}, 0  # 보유 주식 없음, 초기 투자액 0으로 설정
+        return {}, 0  # 보유 주식, 초기 투자액
 
     try:
         transactions_df = pd.read_csv(file_path, sep='\s+', names=["date", "ticker", "action", "shares", "stock_price"])
         holdings = {}
         initial_investment = 0
-        for _, row in transactions_df.iterrows():
+
+        for index, row in transactions_df.iterrows():
             ticker = row['ticker']
             action = row['action']
             shares = row['shares']
             price = row['stock_price']
-            if action == "hold" or action == "buy":
+
+            if index == 0 and action == "hold":
+                # 첫 번째 hold 라인: 초기 투자액 계산
+                initial_investment = shares * price
+                holdings[ticker] = shares
+            elif action == "buy":
                 holdings[ticker] = holdings.get(ticker, 0) + shares
-                initial_investment += shares * price
             elif action == "sell":
-                holdings[ticker] = holdings.get(ticker, 0) - shares
+                if ticker in holdings and holdings[ticker] >= shares:
+                    holdings[ticker] -= shares
+                    if holdings[ticker] == 0:
+                        del holdings[ticker]
+                else:
+                    print(f"Insufficient shares to sell: {ticker}, {shares} shares")
+
+        # 현재 보유 중인 주식만 필터링
         current_holdings = {ticker: shares for ticker, shares in holdings.items() if shares > 0}
         return current_holdings, initial_investment
     except Exception as e:
@@ -146,12 +158,12 @@ def load_transactions(file_path="transactions.txt"):
 
 ### 포트폴리오 가치 및 수익률 계산 ###
 def calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initial_investment):
-    """현재 포트폴리오 가치, 비중, 수익률을 계산합니다."""
+    """현재 포트폴리오 가치, 비중, 수익률을 계산합니다. Cash는 고려하지 않습니다."""
     tsla_shares = current_holdings.get("TSLA", 0)
     tsll_shares = current_holdings.get("TSLL", 0)
     tsla_value = tsla_shares * tsla_close
     tsll_value = tsll_shares * tsll_close
-    total_value = tsla_value + tsll_value
+    total_value = tsla_value + tsll_value  # 주식 가치만 고려
     tsla_weight = tsla_value / total_value if total_value > 0 else 0
     tsll_weight = tsll_value / total_value if total_value > 0 else 0
     returns = ((total_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
@@ -218,7 +230,7 @@ def adjust_portfolio(target_tsll_weight, current_tsll_weight, total_value, tsll_
     current_tsll_value = current_tsll_weight * total_value
     difference = target_tsll_value - current_tsll_value
     shares_to_adjust = int(difference / tsll_close)
-    
+
     if abs(difference) < 100:  # $100 미만 차이는 조정 불필요
         print(" - No significant adjustment needed.")
     elif difference > 0:
@@ -289,13 +301,15 @@ def analyze_and_recommend():
         total_value = initial_portfolio_value
         current_tsll_weight = 0.0
         print("\n### Current Portfolio")
-        print(f"- No holdings found. Assuming initial portfolio value: ${initial_portfolio_value:.2f}")
+        print(f"- Initial Portfolio Value: ${initial_portfolio_value:.2f}")
+        print("- No holdings found. Assuming initial portfolio value for recommendations.")
     else:
         # 거래 내역이 있는 경우: 실제 포트폴리오 계산
         total_value, tsla_value, tsll_value, current_tsla_weight, current_tsll_weight, returns = calculate_portfolio_metrics(
             current_holdings, tsla_close, tsll_close, initial_investment
         )
         print("\n### Current Portfolio")
+        print(f"- Initial Investment: ${initial_investment:.2f}")
         print(f"- TSLA: {current_holdings.get('TSLA', 0)} shares, value: ${tsla_value:.2f}")
         print(f"- TSLL: {current_holdings.get('TSLL', 0)} shares, value: ${tsll_value:.2f}")
         print(f"- Total Portfolio Value: ${total_value:.2f}")
@@ -305,7 +319,7 @@ def analyze_and_recommend():
 
     # 시장 지표를 기반으로 목표 TSLL 비중 계산
     target_tsll_weight, reasons = get_target_tsll_weight(
-        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band, 
+        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band,
         current_tsll_weight, optimal_params
     )
     target_tsla_weight = 1 - target_tsll_weight
