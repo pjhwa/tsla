@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 import yfinance as yf
 import pandas as pd
 import requests
