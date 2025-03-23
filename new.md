@@ -44,7 +44,7 @@ pip install yfinance pandas requests scipy tabulate
   - 형식: 날짜 종목 액션 주식수 주가 (예: 2025/1/1 TSLL hold 3705 23.65)
   - hold: 초기 보유량, buy: 매수, sell: 매도.
   - 파일이 없으면 초기 자산 $100,000으로 가정합니다.
-- optimal_params.json (선택 사항):
+- `optimal_params.json` (선택 사항):
   - 매수/매도 임계값을 사용자 정의할 수 있는 JSON 파일입니다.
   - 기본값 예시:
     ```json
