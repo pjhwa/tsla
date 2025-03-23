@@ -28,7 +28,15 @@ pip install yfinance pandas requests scipy tabulate
      - 파일이 없으면 초기 자산 $100,000으로 가정합니다.
    - `optimal_params.json` (선택 사항): 최적화된 매수/매도 임계값을 포함한 JSON 파일입니다. 없으면 기본값이 사용됩니다.
 
-2. 프로그램 실행:
+2. 프로그램 실행
+   - 저장소를 클론합니다.
+     ```bash
+     git clone https://github.com/pjhwa/tsla.git
+     ```
+   - 프로젝트 디렉토리로 이동합니다.
+     ```bash
+     cd tsla
+     ```
    - 다음 명령어로 프로그램을 실행합니다.
      ```bash
      python portfolio_manager.py
@@ -155,3 +163,10 @@ Buy Signals:
   - MACD > MACD Signal and MACD Signal < 0  
   - Volume Change > 0.10
 ```
+
+## 백테스트
+과거 데이터를 기준으로 각 지표에 대한 최적의 파라미터를 찾기 위한 백테스트를 `Portfolio_backtest.py`로 수행할 수 있습니다. 
+도출된 최적의 파라미터는 `optimal_params.json` 파일로 저장되고, `portfolio_manager.py` 실행 시 읽어들입니다.
+
+## Disclaimer
+이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
