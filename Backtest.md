@@ -33,6 +33,7 @@ pip install pandas numpy deap bayesian-optimization tqdm scipy
 - `fear_greed_2years.csv`: Fear & Greed Index 데이터.
 - `TSLA-history-2y.csv`: TSLA 주가 데이터.
 - `TSLL-history-2y.csv`: TSLL 주가 데이터.
+
 파일은 프로젝트 디렉토리에 저장해야 하며, 자세한 형식은 **Requirements** 섹션을 참조하세요.
 
 ### 2. 프로그램 실행
