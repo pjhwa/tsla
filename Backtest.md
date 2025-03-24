@@ -27,7 +27,7 @@ pip install pandas numpy deap bayesian-optimization tqdm scipy
 
 ## Usage
 
-1. 데이터 파일 준비
+### 1. 데이터 파일 준비
 
 다음 세 개의 CSV 파일이 필요합니다.
 - `fear_greed_2years.csv`: Fear & Greed Index 데이터.
@@ -35,7 +35,7 @@ pip install pandas numpy deap bayesian-optimization tqdm scipy
 - `TSLL-history-2y.csv`: TSLL 주가 데이터.
 파일은 프로젝트 디렉토리에 저장해야 하며, 자세한 형식은 **Requirements** 섹션을 참조하세요.
 
-2. 프로그램 실행
+### 2. 프로그램 실행
 
 터미널에서 다음 명령어를 실행합니다.
 ```bash
@@ -44,7 +44,7 @@ python3 backtest.py
 - 프로그램은 데이터를 로드하고 전처리한 후, 세 가지 최적화 기법(그리드 서치, 유전 알고리즘, 베이지안 최적화)을 순차적으로 실행합니다.
 - 실행 중 진행 상황이 실시간으로 표시됩니다.
 
-3. 출력 확인
+### 3. 출력 확인
 
 각 최적화 기법의 진행 상황과 결과가 콘솔에 출력됩니다.
 최종적으로 최적의 파라미터와 포트폴리오 가치가 `optimal_params.json` 파일에 저장됩니다.
@@ -89,7 +89,7 @@ python3 backtest.py
 
 ## 최적화 알고리즘
 
-1. 그리드 서치 (Grid Search)
+### 1. 그리드 서치 (Grid Search)
 
 - **설명**: 모든 가능한 파라미터 조합을 탐색하여 최적의 조합을 찾습니다.
 - **파라미터 그리드**:
@@ -106,7 +106,7 @@ python3 backtest.py
 - **총 조합 수**: 625,000개 (5^10).
 - **특징**: 철저하지만 계산 비용이 높음.
 
-2. 유전 알고리즘 (Genetic Algorithm)
+### 2. 유전 알고리즘 (Genetic Algorithm)
 
 - **설명**: 진화론적 접근으로 개체군을 생성하고 교차 및 돌연변이를 통해 최적해를 탐색합니다.
 - **파라미터 범위**:
@@ -127,7 +127,7 @@ python3 backtest.py
   - 돌연변이 확률: 0.2
 - **특징**: 효율적이며 복잡한 문제에 적합.
 
-3. 베이지안 최적화 (Bayesian Optimization)
+### 3. 베이지안 최적화 (Bayesian Optimization)
 
 - **설명**: 확률적 모델을 사용하여 파라미터 공간에서 최적점을 효율적으로 탐색합니다.
 - **파라미터 범위**: 유전 알고리즘과 동일.
