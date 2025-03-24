@@ -19,7 +19,7 @@
 
 ## Installation
 
-이 프로그램은 Python 3.6 이상에서 실행됩니다. 필요한 라이브러리를 설치하려면 다음 명령어를 실행하세요:
+이 프로그램은 Python 3.6 이상에서 실행됩니다. 필요한 라이브러리를 설치하려면 다음 명령어를 실행하세요.
 
 ```bash
 pip install pandas numpy deap bayesian-optimization tqdm scipy
