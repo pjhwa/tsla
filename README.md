@@ -167,7 +167,7 @@ Buy Signals:
 ```
 
 ## 백테스트
-과거 데이터를 기준으로 각 지표에 대한 최적의 파라미터를 찾기 위한 백테스트를 `Portfolio_backtest.py`로 수행할 수 있습니다. 
+과거 데이터를 기준으로 각 지표에 대한 최적의 파라미터를 찾기 위한 백테스트를 `backtest.py`로 수행할 수 있습니다. 자세한 내용은 `Backtest.md` 파일의 내용을 참고하세요.
 도출된 최적의 파라미터는 `optimal_params.json` 파일로 저장되고, `portfolio_pulse.py` 실행 시 읽어들입니다.
 
 ## Disclaimer
