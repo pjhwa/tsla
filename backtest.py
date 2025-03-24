@@ -5,8 +5,8 @@ import json
 import random
 from deap import base, creator, tools, algorithms
 from bayes_opt import BayesianOptimization
-
-# 최적 파라미터 도출을 위해 그리드서치, 유전알고리즘, 베이지안알고리즘을 순차적으로 백테스트함
+import time
+from tqdm import tqdm
 
 # 초기 설정
 initial_portfolio_value = 100000
@@ -17,24 +17,19 @@ def load_and_prepare_data():
     과거 데이터를 로드하고 지표를 계산하는 함수.
     실제 구현 시 사용자 데이터에 맞게 수정 필요.
     """
-    # 데이터 로드 (예시 경로, 실제 경로로 대체 필요)
     fear_greed_df = pd.read_csv('fear_greed_2years.csv', parse_dates=['date'])
     tsla_df = pd.read_csv('TSLA-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
     tsll_df = pd.read_csv('TSLL-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
 
-    # 데이터 전처리
     tsla_df['Volume'] = tsla_df['Volume'].str.replace(',', '').astype(float)
     tsll_df['Volume'] = tsll_df['Volume'].str.replace(',', '').astype(float)
 
-    # 날짜 형식 통일 및 인덱스 설정
     fear_greed_df.set_index('date', inplace=True)
     tsla_df.set_index('Date', inplace=True)
     tsll_df.set_index('Date', inplace=True)
 
-    # 데이터 병합
     data = pd.concat([tsla_df, tsll_df.add_prefix('TSLL_'), fear_greed_df['y']], axis=1).dropna()
 
-    # 지표 계산
     data['Daily RSI'] = calculate_rsi(data['Close'], period=14)
     data['Weekly RSI'] = calculate_rsi(data['Close'].resample('W').last(), period=14).reindex(data.index, method='ffill')
     data['SMA50'] = calculate_sma(data['Close'], window=50)
@@ -111,19 +106,16 @@ def simulate_backtest(data, params):
             row['MACD'] < row['MACD_signal']
         ]
 
-        # 변동성에 따른 가중치 동적 조정
         atr = row['ATR']
         w_buy = params['w_buy'] / (1 + atr / data['Close'].mean())
         w_sell = params['w_sell'] * (1 + atr / data['Close'].mean())
 
-        # 비중 조정
         base_weight = current_tsll_weight
         buy_adjustment = w_buy * sum(buy_conditions) * 0.1
         sell_adjustment = w_sell * sum(sell_conditions) * 0.1
         target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 0.8))
         current_tsll_weight = target_weight
 
-        # 수익률 계산
         tsla_return = (data['Close'].iloc[t + 1] / data['Close'].iloc[t]) - 1
         tsll_return = (data['TSLL_Close'].iloc[t + 1] / data['TSLL_Close'].iloc[t]) - 1
         portfolio_return = current_tsll_weight * tsll_return + (1 - current_tsll_weight) * tsla_return
@@ -153,15 +145,26 @@ def optimize_grid_search(data):
     }
 
     keys = list(param_grid.keys())
-    combinations = product(*[param_grid[key] for key in keys])
+    combinations = list(product(*[param_grid[key] for key in keys]))
 
-    for combination in combinations:
+    total_combinations = len(combinations)
+    print(f"그리드 서치 시작: 총 {total_combinations}개의 조합")
+
+    start_time = time.time()
+    for i, combination in enumerate(tqdm(combinations, desc="Grid Search Progress")):
         params = dict(zip(keys, combination))
         final_value = simulate_backtest(data, params)
         if final_value > best_value:
             best_value = final_value
             best_params = params
 
+        if i > 0:
+            elapsed_time = time.time() - start_time
+            time_per_comb = elapsed_time / i
+            remaining_time = time_per_comb * (total_combinations - i)
+            print(f"진행 중: {i}/{total_combinations}, 예상 남은 시간: {remaining_time:.2f}초")
+
+    print(f"그리드 서치 완료: 최적 파라미터 {best_params}, 최종 포트폴리오 가치 {best_value:.2f}")
     return best_params, best_value
 
 ### 유전 알고리즘 최적화 함수 ###
@@ -202,11 +205,18 @@ def optimize_ga(data):
 
     pop = toolbox.population(n=50)
     hof = tools.HallOfFame(1)
-    pop, _ = algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=40,
-                                 halloffame=hof, verbose=False)
+
+    print("유전 알고리즘 시작: 40세대")
+    for gen in tqdm(range(40), desc="GA Progress"):
+        start_time = time.time()
+        pop, _ = algorithms.eaSimple(pop, toolbox, cxpb=0.5, mutpb=0.2, ngen=1,
+                                     halloffame=hof, verbose=False)
+        elapsed_time = time.time() - start_time
+        print(f"세대 {gen+1}/40 완료, 소요 시간: {elapsed_time:.2f}초")
 
     best_params = dict(zip(param_ranges.keys(), hof[0]))
     best_value = simulate_backtest(data, best_params)
+    print(f"유전 알고리즘 완료: 최적 파라미터 {best_params}, 최종 포트폴리오 가치 {best_value:.2f}")
     return best_params, best_value
 
 ### 베이지안 최적화 함수 ###
@@ -231,10 +241,15 @@ def optimize_bayesian(data):
     }
 
     optimizer = BayesianOptimization(f=black_box_function, pbounds=pbounds, random_state=1)
+    print("베이지안 최적화 시작: 초기 포인트 5개, 반복 25회")
+    start_time = time.time()
     optimizer.maximize(init_points=5, n_iter=25)
+    elapsed_time = time.time() - start_time
+    print(f"베이지안 최적화 완료, 총 소요 시간: {elapsed_time:.2f}초")
 
     best_params = optimizer.max['params']
     best_value = optimizer.max['target']
+    print(f"최적 파라미터: {best_params}, 최종 포트폴리오 가치: {best_value:.2f}")
     return best_params, best_value
 
 ### 최적 파라미터 저장 함수 ###
@@ -250,12 +265,11 @@ def save_optimal_params(best_params, file_path="optimal_params.json"):
 def main():
     data = load_and_prepare_data()
 
-    # 최적화 방법 리스트
     methods = ['grid_search', 'ga', 'bayesian']
     results = {}
 
-    # 각 방법으로 최적화 수행
     for method in methods:
+        print(f"\n=== {method.upper()} 최적화 시작 ===")
         if method == 'grid_search':
             best_params, best_value = optimize_grid_search(data)
         elif method == 'ga':
@@ -269,19 +283,16 @@ def main():
             'return': (best_value - initial_portfolio_value) / initial_portfolio_value * 100
         }
 
-    # 최적 방법 선택
     best_method = max(results, key=lambda x: results[x]['value'])
     best_params = results[best_method]['params']
     best_value = results[best_method]['value']
     best_return = results[best_method]['return']
 
-    # 결과 출력
-    print(f"최적의 방법: {best_method}")
+    print(f"\n최적의 방법: {best_method}")
     print(f"최적 파라미터: {best_params}")
     print(f"최종 포트폴리오 가치: ${best_value:.2f}")
     print(f"수익률: {best_return:.2f}%")
 
-    # 최적 파라미터 저장
     save_optimal_params(best_params)
 
 if __name__ == "__main__":
