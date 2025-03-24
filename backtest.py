@@ -11,27 +11,20 @@ from itertools import product
 import argparse
 import logging
 import sys
+from functools import partial
 
 # 초기 설정
 initial_portfolio_value = 100000
 
-# 전역 변수로 데이터와 keys 설정
-global_data = None
-global_keys = None
-
 # 로깅 설정 (stdout과 파일에 동시에 출력)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
-file_handler = logging.FileHandler('optimization_log', mode='a')  # 'a' 모드로 추가 기록
+file_handler = logging.FileHandler('optimization_log', mode='a')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
 
 ### 데이터 로드 및 전처리 ###
 def load_and_prepare_data():
-    """
-    과거 데이터를 로드하고 지표를 계산하는 함수.
-    실제 구현 시 사용자 데이터에 맞게 수정 필요.
-    """
     fear_greed_df = pd.read_csv('fear_greed_2years.csv', parse_dates=['date'])
     tsla_df = pd.read_csv('TSLA-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
     tsll_df = pd.read_csv('TSLL-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
@@ -58,7 +51,6 @@ def load_and_prepare_data():
 
 ### 지표 계산 함수 ###
 def calculate_rsi(data, period):
-    """RSI (Relative Strength Index)를 계산"""
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -66,11 +58,9 @@ def calculate_rsi(data, period):
     return 100 - (100 / (1 + rs))
 
 def calculate_sma(data, window):
-    """단순 이동 평균(SMA)을 계산"""
     return data.rolling(window=window).mean()
 
 def calculate_bollinger_bands(data, window=20, num_std=2):
-    """볼린저 밴드(Bollinger Bands)를 계산"""
     sma = data.rolling(window=window).mean()
     std = data.rolling(window=window).std()
     upper = sma + (std * num_std)
@@ -78,7 +68,6 @@ def calculate_bollinger_bands(data, window=20, num_std=2):
     return upper, lower
 
 def calculate_macd(data, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD (Moving Average Convergence Divergence)를 계산"""
     ema_fast = data.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = data.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -86,7 +75,6 @@ def calculate_macd(data, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd, macd_signal
 
 def calculate_atr(data, period=14):
-    """평균 진폭 범위(ATR, Average True Range)를 계산"""
     high_low = data['High'] - data['Low']
     high_close = np.abs(data['High'] - data['Close'].shift())
     low_close = np.abs(data['Low'] - data['Close'].shift())
@@ -96,13 +84,9 @@ def calculate_atr(data, period=14):
 
 ### 벡터화된 백테스팅 함수 ###
 def simulate_backtest_vectorized(data, params):
-    """
-    주어진 파라미터로 백테스팅을 수행하여 최종 포트폴리오 가치를 계산 (벡터화).
-    """
     portfolio_value = np.ones(len(data)) * initial_portfolio_value
     current_tsll_weight = np.zeros(len(data))
 
-    # 매수/매도 조건을 벡터화
     buy_conditions = (
         (data['Daily RSI'] < params['daily_rsi_buy']) &
         (data['Weekly RSI'] < params['weekly_rsi_buy']) &
@@ -120,18 +104,15 @@ def simulate_backtest_vectorized(data, params):
         (data['MACD'] < data['MACD_signal'])
     )
 
-    # ATR을 사용한 가중치 계산
     atr = data['ATR']
     w_buy = params['w_buy'] / (1 + atr / data['Close'].mean())
     w_sell = params['w_sell'] * (1 + atr / data['Close'].mean())
 
-    # 비중 조정
     buy_adj = w_buy * buy_conditions * 0.1
     sell_adj = w_sell * sell_conditions * 0.1
     target_weight = np.clip(current_tsll_weight + buy_adj - sell_adj, 0, 0.8)
     current_tsll_weight = target_weight
 
-    # 수익률 계산
     tsla_return = data['Close'].pct_change().fillna(0)
     tsll_return = data['TSLL_Close'].pct_change().fillna(0)
     portfolio_return = current_tsll_weight.shift(1) * tsll_return + (1 - current_tsll_weight.shift(1)) * tsla_return
@@ -140,29 +121,18 @@ def simulate_backtest_vectorized(data, params):
     return portfolio_value.iloc[-1]
 
 ### Grid Search를 위한 전역 평가 함수 ###
-def evaluate_combination(comb):
-    """
-    Grid Search에서 사용할 전역 평가 함수.
-    global_data와 global_keys를 사용하여 데이터와 파라미터 키에 접근.
-    """
-    global global_data, global_keys
-    params = dict(zip(global_keys, comb))
-    return simulate_backtest_vectorized(global_data, params)
+def evaluate_combination(comb, data, keys):
+    params = dict(zip(keys, comb))
+    return simulate_backtest_vectorized(data, params)
 
-### Grid Search 최적화 함수 (병렬 처리 및 진행 상황 표시) ###
+### Grid Search 최적화 함수 ###
 def optimize_grid_search_parallel(data, processes, n_samples):
-    """
-    병렬 Grid Search를 통해 최적의 파라미터를 탐색 (랜덤 샘플링).
-    """
-    global global_data, global_keys
-    global_data = data  # 전역 변수에 데이터 할당
-
     param_grid = {
         'daily_rsi_buy': [10, 20, 30, 40],
         'daily_rsi_sell': [60, 70, 80, 90],
         'weekly_rsi_buy': [20, 30, 40, 50],
-        'weekly_rsi_sell': [50, 60, 70, 80],
-        'fg_buy': [10, 20, 30, 40, 50, 60],
+        'weekly_rsi_sell': [60, 70, 80, 90],
+        'fg_buy': [10, 20, 30, 40, 50],
         'fg_sell': [60, 70, 80, 90],
         'volume_change_buy': [-1.0, -0.5, 0.0, 0.5, 1.0],
         'volume_change_sell': [-1.0, -0.5, 0.0, 0.5, 1.0],
@@ -170,8 +140,8 @@ def optimize_grid_search_parallel(data, processes, n_samples):
         'w_sell': [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
     }
 
-    global_keys = list(param_grid.keys())  # 전역 변수에 keys 설정
-    all_combinations = list(product(*[param_grid[key] for key in global_keys]))
+    keys = list(param_grid.keys())
+    all_combinations = list(product(*[param_grid[key] for key in keys]))
     if len(all_combinations) < n_samples:
         logger.warning(f"Total combinations ({len(all_combinations)}) are less than requested samples ({n_samples}). Using all combinations.")
         sampled_combinations = all_combinations
@@ -185,11 +155,11 @@ def optimize_grid_search_parallel(data, processes, n_samples):
 
     start_time = time.time()
     with Pool(processes=processes) as pool:
-        results = list(tqdm(pool.imap(evaluate_combination, sampled_combinations), total=len(sampled_combinations), desc="Grid Search Progress"))
+        results = list(tqdm(pool.starmap(evaluate_combination, [(comb, data, keys) for comb in sampled_combinations]), total=len(sampled_combinations), desc="Grid Search Progress"))
         for i, (comb, value) in enumerate(zip(sampled_combinations, results)):
             if value > best_value:
                 best_value = value
-                best_params = dict(zip(global_keys, comb))
+                best_params = dict(zip(keys, comb))
             if i % 1000 == 0 and i > 0:
                 elapsed_time = time.time() - start_time
                 estimated_total_time = (elapsed_time / (i + 1)) * len(sampled_combinations)
@@ -199,12 +169,8 @@ def optimize_grid_search_parallel(data, processes, n_samples):
     logger.info(f"Grid Search 완료: 최적 파라미터 {best_params}, 최종 포트폴리오 가치 {best_value:.2f}")
     return best_params, best_value
 
-### GA 최적화 함수 (병렬 처리) ###
-def evaluate(individual):
-    """
-    개체의 적합도를 평가하는 전역 함수.
-    """
-    global global_data
+### GA 최적화 함수 ###
+def evaluate(individual, data):
     params = {
         'daily_rsi_buy': individual[0],
         'daily_rsi_sell': individual[1],
@@ -217,24 +183,29 @@ def evaluate(individual):
         'w_buy': individual[8],
         'w_sell': individual[9]
     }
-    return simulate_backtest_vectorized(global_data, params),
+    return simulate_backtest_vectorized(data, params),
+
+def clip_individual(individual, param_ranges):
+    for i, (low, high) in enumerate(param_ranges):
+        individual[i] = max(low, min(high, individual[i]))
+    return individual
 
 def optimize_ga_parallel(data, processes, population_size, generations):
-    """
-    병렬 유전 알고리즘을 통해 최적의 파라미터를 탐색.
-    """
-    global global_data
-    global_data = data  # 전역 변수에 데이터 할당
-
     creator.create("FitnessMax", base.Fitness, weights=(1.0,))
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
     toolbox = base.Toolbox()
     param_ranges = [
-        (10, 40), (60, 90), (20, 50), (50, 80),  # RSI
-        (10, 60), (60, 90),  # Fear & Greed
-        (-1.0, 1.0), (-1.0, 1.0),  # Volume Change
-        (0.5, 3.0), (0.5, 3.0)  # Weights
+        (0, 50),     # daily_rsi_buy: 0 ~ 50 (개선됨)
+        (50, 100),   # daily_rsi_sell: 50 ~ 100
+        (0, 50),     # weekly_rsi_buy: 0 ~ 50 (개선됨)
+        (50, 100),   # weekly_rsi_sell: 50 ~ 100
+        (0, 50),     # fg_buy: 0 ~ 50 (개선됨)
+        (50, 100),   # fg_sell: 50 ~ 100
+        (-1.0, 1.0), # volume_change_buy: -1.0 ~ 1.0
+        (-1.0, 1.0), # volume_change_sell: -1.0 ~ 1.0
+        (0.5, 3.0),  # w_buy: 0.5 ~ 3.0
+        (0.5, 3.0)   # w_sell: 0.5 ~ 3.0
     ]
     for i, (low, high) in enumerate(param_ranges):
         toolbox.register(f"attr{i}", random.uniform, low, high)
@@ -243,10 +214,16 @@ def optimize_ga_parallel(data, processes, population_size, generations):
                       toolbox.attr4, toolbox.attr5, toolbox.attr6, toolbox.attr7,
                       toolbox.attr8, toolbox.attr9], n=1)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("evaluate", evaluate)
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
-    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=1, indpb=0.2)
     toolbox.register("select", tools.selTournament, tournsize=3)
+
+    def mutate_with_clip(individual):
+        tools.mutGaussian(individual, mu=0, sigma=1, indpb=0.2)
+        clip_individual(individual, param_ranges)
+        return individual,
+
+    toolbox.register("mutate", mutate_with_clip)
+    toolbox.register("evaluate", partial(evaluate, data=data))
 
     pool = Pool(processes=processes)
     toolbox.register("map", pool.map)
@@ -265,23 +242,25 @@ def optimize_ga_parallel(data, processes, population_size, generations):
     pool.close()
     pool.join()
 
+    best_individual = hof[0]
     best_params = {
-        'daily_rsi_buy': hof[0][0], 'daily_rsi_sell': hof[0][1],
-        'weekly_rsi_buy': hof[0][2], 'weekly_rsi_sell': hof[0][3],
-        'fg_buy': hof[0][4], 'fg_sell': hof[0][5],
-        'volume_change_buy': max(min(hof[0][6], 1.0), -1.0),
-        'volume_change_sell': max(min(hof[0][7], 1.0), -1.0),
-        'w_buy': hof[0][8], 'w_sell': hof[0][9]
+        'daily_rsi_buy': max(0, min(50, best_individual[0])),       # 0 ~ 50
+        'daily_rsi_sell': max(50, min(100, best_individual[1])),    # 50 ~ 100
+        'weekly_rsi_buy': max(0, min(50, best_individual[2])),      # 0 ~ 50
+        'weekly_rsi_sell': max(50, min(100, best_individual[3])),   # 50 ~ 100
+        'fg_buy': max(0, min(50, best_individual[4])),              # 0 ~ 50
+        'fg_sell': max(50, min(100, best_individual[5])),           # 50 ~ 100
+        'volume_change_buy': max(-1.0, min(1.0, best_individual[6])),
+        'volume_change_sell': max(-1.0, min(1.0, best_individual[7])),
+        'w_buy': max(0.5, min(3.0, best_individual[8])),
+        'w_sell': max(0.5, min(3.0, best_individual[9]))
     }
-    best_value = evaluate(hof[0])[0]
+    best_value = evaluate(best_individual, data)[0]
     logger.info(f"GA 완료: 최적 파라미터 {best_params}, 최종 포트폴리오 가치 {best_value:.2f}")
     return best_params, best_value, logbook
 
 ### 베이지안 최적화 함수 ###
 def optimize_bayesian(data, init_points, n_iter):
-    """
-    베이지안 최적화를 통해 최적의 파라미터를 탐색.
-    """
     def black_box_function(daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell, fg_buy, fg_sell, volume_change_buy, volume_change_sell, w_buy, w_sell):
         params = {
             'daily_rsi_buy': daily_rsi_buy,
@@ -298,12 +277,12 @@ def optimize_bayesian(data, init_points, n_iter):
         return simulate_backtest_vectorized(data, params)
 
     pbounds = {
-        'daily_rsi_buy': (10, 40),
-        'daily_rsi_sell': (60, 90),
-        'weekly_rsi_buy': (20, 50),
-        'weekly_rsi_sell': (50, 80),
-        'fg_buy': (10, 60),
-        'fg_sell': (60, 90),
+        'daily_rsi_buy': (0, 50),       # 개선됨
+        'daily_rsi_sell': (50, 100),
+        'weekly_rsi_buy': (0, 50),      # 개선됨
+        'weekly_rsi_sell': (50, 100),
+        'fg_buy': (0, 50),              # 개선됨
+        'fg_sell': (50, 100),
         'volume_change_buy': (-1.0, 1.0),
         'volume_change_sell': (-1.0, 1.0),
         'w_buy': (0.5, 3.0),
@@ -320,9 +299,6 @@ def optimize_bayesian(data, init_points, n_iter):
 
 ### 최적 파라미터 저장 함수 ###
 def save_optimal_params(best_params, file_path="optimal_params.json"):
-    """
-    최적 파라미터를 JSON 파일로 저장.
-    """
     with open(file_path, "w") as f:
         json.dump(best_params, f)
     logger.info(f"최적 파라미터가 {file_path}에 저장되었습니다.")
@@ -353,7 +329,6 @@ def main(args):
     elapsed_time = time.time() - start_time
     logger.info(f"{method.upper()} 완료: 실행 시간 {elapsed_time:.2f}초, 최종 포트폴리오 가치 {best_value:.2f}")
 
-    # 세대별 통계 정보 출력 (GA의 경우)
     if method == 'ga' and logbook:
         logger.info("\nGA 세대별 통계 정보:")
         for record in logbook:
