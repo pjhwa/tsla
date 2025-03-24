@@ -123,7 +123,16 @@ def simulate_backtest_vectorized(data, params):
 ### Grid Search를 위한 전역 평가 함수 ###
 def evaluate_combination(comb, data, keys):
     params = dict(zip(keys, comb))
-    return simulate_backtest_vectorized(data, params)
+    # 패널티 함수 적용
+    penalty = 0
+    if params['daily_rsi_sell'] - params['daily_rsi_buy'] < 10:
+        penalty += (10 - (params['daily_rsi_sell'] - params['daily_rsi_buy'])) * 10000
+    if params['weekly_rsi_sell'] - params['weekly_rsi_buy'] < 10:
+        penalty += (10 - (params['weekly_rsi_sell'] - params['weekly_rsi_buy'])) * 10000
+    if params['fg_sell'] - params['fg_buy'] < 10:
+        penalty += (10 - (params['fg_sell'] - params['fg_buy'])) * 10000
+    fitness = simulate_backtest_vectorized(data, params) - penalty
+    return fitness
 
 ### Grid Search 최적화 함수 ###
 def optimize_grid_search_parallel(data, processes, n_samples):
@@ -183,12 +192,41 @@ def evaluate(individual, data):
         'w_buy': individual[8],
         'w_sell': individual[9]
     }
-    return simulate_backtest_vectorized(data, params),
+    # 패널티 함수 적용
+    penalty = 0
+    if params['daily_rsi_sell'] - params['daily_rsi_buy'] < 10:
+        penalty += (10 - (params['daily_rsi_sell'] - params['daily_rsi_buy'])) * 10000
+    if params['weekly_rsi_sell'] - params['weekly_rsi_buy'] < 10:
+        penalty += (10 - (params['weekly_rsi_sell'] - params['weekly_rsi_buy'])) * 10000
+    if params['fg_sell'] - params['fg_buy'] < 10:
+        penalty += (10 - (params['fg_sell'] - params['fg_buy'])) * 10000
+    fitness = simulate_backtest_vectorized(data, params) - penalty
+    return (fitness,)
 
 def clip_individual(individual, param_ranges):
     for i, (low, high) in enumerate(param_ranges):
         individual[i] = max(low, min(high, individual[i]))
     return individual
+
+def generate_individual(toolbox, param_ranges):
+    while True:
+        individual = toolbox.individual()
+        params = {
+            'daily_rsi_buy': individual[0],
+            'daily_rsi_sell': individual[1],
+            'weekly_rsi_buy': individual[2],
+            'weekly_rsi_sell': individual[3],
+            'fg_buy': individual[4],
+            'fg_sell': individual[5],
+            'volume_change_buy': individual[6],
+            'volume_change_sell': individual[7],
+            'w_buy': individual[8],
+            'w_sell': individual[9]
+        }
+        if (params['daily_rsi_sell'] - params['daily_rsi_buy'] >= 10 and
+            params['weekly_rsi_sell'] - params['weekly_rsi_buy'] >= 10 and
+            params['fg_sell'] - params['fg_buy'] >= 10):
+            return individual
 
 def optimize_ga_parallel(data, processes, population_size, generations):
     creator.create("FitnessMax", base.Fitness, weights=(1.0,))
@@ -196,16 +234,16 @@ def optimize_ga_parallel(data, processes, population_size, generations):
 
     toolbox = base.Toolbox()
     param_ranges = [
-        (0, 50),     # daily_rsi_buy: 0 ~ 50 (개선됨)
+        (0, 50),     # daily_rsi_buy: 0 ~ 50
         (50, 100),   # daily_rsi_sell: 50 ~ 100
-        (0, 50),     # weekly_rsi_buy: 0 ~ 50 (개선됨)
+        (0, 50),     # weekly_rsi_buy: 0 ~ 50
         (50, 100),   # weekly_rsi_sell: 50 ~ 100
-        (0, 50),     # fg_buy: 0 ~ 50 (개선됨)
+        (0, 50),     # fg_buy: 0 ~ 50
         (50, 100),   # fg_sell: 50 ~ 100
-        (-1.0, 1.0), # volume_change_buy: -1.0 ~ 1.0
-        (-1.0, 1.0), # volume_change_sell: -1.0 ~ 1.0
-        (0.5, 3.0),  # w_buy: 0.5 ~ 3.0
-        (0.5, 3.0)   # w_sell: 0.5 ~ 3.0
+        (-1.0, 1.0), # volume_change_buy
+        (-1.0, 1.0), # volume_change_sell
+        (0.5, 3.0),  # w_buy
+        (0.5, 3.0)   # w_sell
     ]
     for i, (low, high) in enumerate(param_ranges):
         toolbox.register(f"attr{i}", random.uniform, low, high)
@@ -213,7 +251,8 @@ def optimize_ga_parallel(data, processes, population_size, generations):
                      [toolbox.attr0, toolbox.attr1, toolbox.attr2, toolbox.attr3,
                       toolbox.attr4, toolbox.attr5, toolbox.attr6, toolbox.attr7,
                       toolbox.attr8, toolbox.attr9], n=1)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+    # 제약을 만족하는 개체만 생성
+    toolbox.register("population", tools.initRepeat, list, partial(generate_individual, toolbox, param_ranges))
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
     toolbox.register("select", tools.selTournament, tournsize=3)
 
@@ -244,12 +283,12 @@ def optimize_ga_parallel(data, processes, population_size, generations):
 
     best_individual = hof[0]
     best_params = {
-        'daily_rsi_buy': max(0, min(50, best_individual[0])),       # 0 ~ 50
-        'daily_rsi_sell': max(50, min(100, best_individual[1])),    # 50 ~ 100
-        'weekly_rsi_buy': max(0, min(50, best_individual[2])),      # 0 ~ 50
-        'weekly_rsi_sell': max(50, min(100, best_individual[3])),   # 50 ~ 100
-        'fg_buy': max(0, min(50, best_individual[4])),              # 0 ~ 50
-        'fg_sell': max(50, min(100, best_individual[5])),           # 50 ~ 100
+        'daily_rsi_buy': max(0, min(50, best_individual[0])),
+        'daily_rsi_sell': max(50, min(100, best_individual[1])),
+        'weekly_rsi_buy': max(0, min(50, best_individual[2])),
+        'weekly_rsi_sell': max(50, min(100, best_individual[3])),
+        'fg_buy': max(0, min(50, best_individual[4])),
+        'fg_sell': max(50, min(100, best_individual[5])),
         'volume_change_buy': max(-1.0, min(1.0, best_individual[6])),
         'volume_change_sell': max(-1.0, min(1.0, best_individual[7])),
         'w_buy': max(0.5, min(3.0, best_individual[8])),
@@ -274,14 +313,23 @@ def optimize_bayesian(data, init_points, n_iter):
             'w_buy': w_buy,
             'w_sell': w_sell
         }
-        return simulate_backtest_vectorized(data, params)
+        # 패널티 함수 적용
+        penalty = 0
+        if daily_rsi_sell - daily_rsi_buy < 10:
+            penalty += (10 - (daily_rsi_sell - daily_rsi_buy)) * 10000
+        if weekly_rsi_sell - weekly_rsi_buy < 10:
+            penalty += (10 - (weekly_rsi_sell - weekly_rsi_buy)) * 10000
+        if fg_sell - fg_buy < 10:
+            penalty += (10 - (fg_sell - fg_buy)) * 10000
+        fitness = simulate_backtest_vectorized(data, params) - penalty
+        return fitness
 
     pbounds = {
-        'daily_rsi_buy': (0, 50),       # 개선됨
+        'daily_rsi_buy': (0, 50),
         'daily_rsi_sell': (50, 100),
-        'weekly_rsi_buy': (0, 50),      # 개선됨
+        'weekly_rsi_buy': (0, 50),
         'weekly_rsi_sell': (50, 100),
-        'fg_buy': (0, 50),              # 개선됨
+        'fg_buy': (0, 50),
         'fg_sell': (50, 100),
         'volume_change_buy': (-1.0, 1.0),
         'volume_change_sell': (-1.0, 1.0),
