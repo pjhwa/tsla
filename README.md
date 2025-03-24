@@ -20,7 +20,7 @@ pip install yfinance pandas requests scipy tabulate
 ## Usage
 
 ### 1. 데이터 파일 준비
-   - `transactions.txt` (선택 사항): 포트폴리오의 거래 내역을 기록한 파일입니다. 형식은 날짜 종목 액션 주식수 주가이며, 예시는 다음과 같습니다:
+   - `transactions.txt` (선택 사항): 포트폴리오의 거래 내역을 기록한 파일입니다. 형식은 날짜 종목 액션 주식수 주가이며, 예시는 다음과 같습니다.
      ```
      2025/1/1 TSLL hold 1000 23.65
      2025/2/12 TSLL sell 1000 18.48
