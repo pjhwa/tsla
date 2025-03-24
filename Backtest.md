@@ -52,7 +52,7 @@ python3 backtest.py
 
 ## Requirements
 
-`fear_greed_2years.csv`
+### `fear_greed_2years.csv`
 - **설명**: Fear & Greed Index 데이터.
 - **필수 열**:
   - `date`: 날짜 (형식: `%m/%d/%Y`).
@@ -62,7 +62,7 @@ python3 backtest.py
   python3 fear_greed.py
   ```
   
-`TSLA-history-2y.csv`
+### `TSLA-history-2y.csv`
 - **설명**: TSLA 주가 데이터.
 - **필수 열**:
   - `Date`: 날짜 (형식: `%m/%d/%Y`).
@@ -75,7 +75,7 @@ python3 backtest.py
   python3 getdata.py --ticker=TSLA
   ```
   
-`TSLL-history-2y.csv`
+### `TSLL-history-2y.csv`
 - **설명**: TSLL 주가 데이터.
 - **필수 열**: 위와 동일 (`TSLL_` 접두사가 내부적으로 추가됨).
 - **생성 방법**
