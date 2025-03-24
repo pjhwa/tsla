@@ -1,4 +1,4 @@
-# TSLA/TSLL Portfolio Backtest Optimization
+# Portfolio Pulse Backtest Optimization
 
 이 프로그램은 TSLA와 TSLL 주식으로 구성된 포트폴리오를 최적화하기 위해 과거 데이터를 분석하고, **그리드 서치**, **유전 알고리즘**, **베이지안 최적화**를 사용하여 최적의 파라미터를 탐색합니다. 최종적으로 가장 높은 포트폴리오 가치를 제공하는 파라미터를 선택하여 `optimal_params.json` 파일에 저장합니다.
 
