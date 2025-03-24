@@ -53,7 +53,7 @@ python3 backtest.py
 ## Requirements
 
 ### `fear_greed_2years.csv`
-- **설명**: Fear & Greed Index 데이터.
+- **설명**: Fear & Greed Index 데이터 (과거 2년간).
 - **필수 열**:
   - `date`: 날짜 (형식: `%m/%d/%Y`).
   - `y`: Fear & Greed Index 값 (숫자).
@@ -63,7 +63,7 @@ python3 backtest.py
   ```
   
 ### `TSLA-history-2y.csv`
-- **설명**: TSLA 주가 데이터.
+- **설명**: TSLA 주가 데이터 (과거 2년간).
 - **필수 열**:
   - `Date`: 날짜 (형식: `%m/%d/%Y`).
   - `Close`: 종가.
@@ -76,7 +76,7 @@ python3 backtest.py
   ```
   
 ### `TSLL-history-2y.csv`
-- **설명**: TSLL 주가 데이터.
+- **설명**: TSLL 주가 데이터 (과거 2년간).
 - **필수 열**: 위와 동일 (`TSLL_` 접두사가 내부적으로 추가됨).
 - **생성 방법**
   ```bash
@@ -184,6 +184,7 @@ python3 backtest.py
   최종 포트폴리오 가치: $150000.00
   수익률: 50.00%
   최적 파라미터가 optimal_params.json에 저장되었습니다.
+  ```
 
 ### 결과 해석
 - **최적 파라미터**: 매수/매도 조건과 비중 조정 가중치.
