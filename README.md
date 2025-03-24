@@ -18,7 +18,8 @@ pip install yfinance pandas requests scipy tabulate
 ```
 
 ## Usage
-1. 데이터 파일 준비
+
+### 1. 데이터 파일 준비
    - `transactions.txt` (선택 사항): 포트폴리오의 거래 내역을 기록한 파일입니다. 형식은 날짜 종목 액션 주식수 주가이며, 예시는 다음과 같습니다:
      ```
      2025/1/1 TSLL hold 1000 23.65
@@ -28,7 +29,7 @@ pip install yfinance pandas requests scipy tabulate
      - 파일이 없으면 초기 자산 $100,000으로 가정합니다.
    - `optimal_params.json` (선택 사항): 최적화된 매수/매도 임계값을 포함한 JSON 파일입니다. 없으면 기본값이 사용됩니다.
 
-2. 프로그램 실행
+### 2. 프로그램 실행
    - 저장소를 클론합니다.
      ```bash
      git clone https://github.com/pjhwa/tsla.git
@@ -43,16 +44,17 @@ pip install yfinance pandas requests scipy tabulate
      ```
    - 프로그램은 실시간 주가 데이터와 시장 지표를 분석하여 포트폴리오 조정 제안을 출력합니다.
 
-3. 출력 확인
+### 3. 출력 확인
    - 프로그램은 시장 지표, 현재 주가, 포트폴리오 상태, 추천 비중, 조정 제안, 조정 이유 등을 출력합니다.
 
 ## Requirements
-- `transactions.txt` (선택 사항):
+
+### `transactions.txt` (선택 사항)
   - 거래 내역을 기록한 텍스트 파일입니다. 
   - 형식: 날짜 종목 액션 주식수 주가 (예: 2025/1/1 TSLL hold 3705 23.65)
   - hold: 초기 보유량, buy: 매수, sell: 매도.
   - 파일이 없으면 초기 자산 $100,000으로 가정합니다.
-- `optimal_params.json` (선택 사항):
+### `optimal_params.json` (선택 사항)
   - 매수/매도 임계값을 사용자 정의할 수 있는 JSON 파일입니다.
   - 기본값 예시:
     ```json
