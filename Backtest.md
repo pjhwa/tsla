@@ -9,7 +9,7 @@
 아래 명령어를 사용하여 필요한 Python 라이브러리를 설치하세요.
 
 ```bash
-pip install pandas numpy deap bayes_opt tqdm
+pip install pandas numpy deap bayesian_optimization tqdm
 ```
 
 ### 2. 데이터 파일 준비
