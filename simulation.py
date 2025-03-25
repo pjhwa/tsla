@@ -1,23 +1,91 @@
 import pandas as pd
 import numpy as np
 import json
+from scipy.stats import linregress
+import os
+from datetime import datetime, timedelta
 import argparse
-import datetime
 from tabulate import tabulate
-from dateutil.relativedelta import relativedelta
 
-# 초기 설정
-initial_portfolio_value = 100000  # 초기 자산 $100,000
-default_end_date = pd.Timestamp('2025-03-25')  # 기본 끝 날짜
+# 데이터 로드 및 전처리
+def load_data(start_date, end_date):
+    """지정된 기간의 주가 데이터와 공포탐욕지수를 로드하고 전처리합니다."""
+    fear_greed_df = pd.read_csv('fear_greed_2years.csv', parse_dates=['date'])
+    tsla_df = pd.read_csv('TSLA-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
+    tsll_df = pd.read_csv('TSLL-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
 
-### 최적 파라미터 로드 함수 ###
-def load_optimal_params(file_path="optimal_params.json"):
-    """JSON 파일에서 최적 파라미터를 로드합니다. 파일이 없으면 기본값을 반환합니다."""
+    tsla_df['Volume'] = tsla_df['Volume'].str.replace(',', '').astype(float)
+    tsll_df['Volume'] = tsll_df['Volume'].str.replace(',', '').astype(float)
+
+    data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
+    data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
+    data.set_index('Date', inplace=True)
+    data = data.dropna()
+
+    data = data[(data.index >= start_date) & (data.index <= end_date)]
+
+    data['RSI_TSLA'] = calculate_rsi(data['Close_TSLA'], 14)
+    data['SMA50_TSLA'] = calculate_sma(data['Close_TSLA'], 50)
+    data['SMA200_TSLA'] = calculate_sma(data['Close_TSLA'], 200)
+    data['Upper Band_TSLA'], _, data['Lower Band_TSLA'] = calculate_bollinger_bands(data['Close_TSLA'])
+    data['MACD_TSLA'], data['MACD_signal_TSLA'] = calculate_macd(data['Close_TSLA'])
+    data['Volume Change_TSLA'] = data['Volume_TSLA'].pct_change()
+    data['ATR_TSLA'] = calculate_atr(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']], 14)
+    data['Weekly RSI_TSLA'] = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14).reindex(data.index, method='ffill').fillna(50)
+
+    return data
+
+# 지표 계산 함수
+def calculate_rsi(series, timeperiod=14):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_sma(series, timeperiod=20):
+    return series.rolling(window=timeperiod).mean()
+
+def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
+    ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
+    ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
+    return macd, macd_signal
+
+def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
+    sma = series.rolling(window=timeperiod).mean()
+    std = series.rolling(window=timeperiod).std()
+    upper_band = sma + (std * nbdevup)
+    lower_band = sma - (std * nbdevdn)
+    return upper_band, sma, lower_band
+
+def calculate_atr(df, timeperiod=14):
+    high_low = df['High_TSLA'] - df['Low_TSLA']
+    high_close = np.abs(df['High_TSLA'] - df['Close_TSLA'].shift())
+    low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(window=timeperiod).mean()
+    return atr
+
+def get_rsi_trend(rsi_series, window=10):
+    if len(rsi_series) < window:
+        return "Stable"
+    slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
+    if slope > 0.1:
+        return "Increasing"
+    elif slope < -0.1:
+        return "Decreasing"
+    return "Stable"
+
+# 파라미터 로드
+def load_params(file_path="optimal_params.json"):
     try:
         with open(file_path, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"최적 파라미터 파일({file_path})이 없습니다. 기본값을 사용합니다.")
+        print(f"{file_path} 파일이 없습니다. 기본 파라미터를 사용합니다.")
         return {
             "fg_buy": 25,
             "fg_sell": 75,
@@ -33,286 +101,191 @@ def load_optimal_params(file_path="optimal_params.json"):
             "w_sell": 1.0
         }
 
-### 데이터 로드 및 전처리 ###
-def load_and_prepare_data(period, start_date=None):
-    """CSV 파일에서 데이터를 로드하고 시뮬레이션 기간에 맞게 필터링합니다."""
-    fear_greed_df = pd.read_csv('fear_greed_2years.csv', parse_dates=['date'])
-    tsla_df = pd.read_csv('TSLA-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
-    tsll_df = pd.read_csv('TSLL-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
-
-    # Volume 데이터 전처리
-    tsla_df['Volume'] = tsla_df['Volume'].str.replace(',', '').astype(float)
-    tsll_df['Volume'] = tsll_df['Volume'].str.replace(',', '').astype(float)
-
-    # 인덱스 설정
-    fear_greed_df.set_index('date', inplace=True)
-    tsla_df.set_index('Date', inplace=True)
-    tsll_df.set_index('Date', inplace=True)
-
-    # 데이터 병합
-    data = pd.concat([tsla_df, tsll_df.add_prefix('TSLL_'), fear_greed_df['y']], axis=1).dropna()
-
-    # 기술적 지표 계산
-    data['Daily RSI'] = calculate_rsi(data['Close'], timeperiod=14)
-    data['Weekly RSI'] = calculate_rsi(data['Close'].resample('W').last(), timeperiod=14).reindex(data.index, method='ffill')
-    data['SMA50'] = calculate_sma(data['Close'], timeperiod=50)
-    data['SMA200'] = calculate_sma(data['Close'], timeperiod=200)
-    data['Upper Band'], data['Middle Band'], data['Lower Band'] = calculate_bollinger_bands(data['Close'])
-    data['MACD'], data['MACD_signal'] = calculate_macd(data['Close'])
-    data['Volume Change'] = data['Volume'].pct_change().fillna(0)
-    data['ATR'] = calculate_atr(data, timeperiod=14)
-
-    # 시뮬레이션 기간 설정
-    if start_date:
-        start_date = pd.Timestamp(start_date)
-        if period == '1M':
-            end_date = start_date + relativedelta(months=1)
-        elif period == '3M':
-            end_date = start_date + relativedelta(months=3)
-        elif period == '6M':
-            end_date = start_date + relativedelta(months=6)
-        elif period == '1Y':
-            end_date = start_date + relativedelta(years=1)
-        else:
-            raise ValueError("Invalid period. Use '1M', '3M', '6M', or '1Y'.")
-    else:
-        end_date = default_end_date
-        if period == '1M':
-            start_date = end_date - pd.offsets.MonthEnd(1)
-        elif period == '3M':
-            start_date = end_date - pd.offsets.MonthEnd(3)
-        elif period == '6M':
-            start_date = end_date - pd.offsets.MonthEnd(6)
-        elif period == '1Y':
-            start_date = end_date - pd.offsets.DateOffset(years=1)
-        else:
-            raise ValueError("Invalid period. Use '1M', '3M', '6M', or '1Y'.")
-
-    # 기간 필터링
-    data = data.loc[start_date:end_date]
-    return data, start_date, end_date
-
-### 지표 계산 함수 ###
-def calculate_rsi(series, timeperiod=14):
-    """RSI(상대강도지수)를 계산합니다."""
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
-    loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def calculate_sma(series, timeperiod=20):
-    """단순 이동평균(SMA)을 계산합니다."""
-    return series.rolling(window=timeperiod).mean()
-
-def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD와 신호선을 계산합니다."""
-    ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
-    ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
-    macd = ema_fast - ema_slow
-    macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
-    return macd, macd_signal
-
-def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """볼린저 밴드를 계산합니다."""
-    sma = series.rolling(window=timeperiod).mean()
-    std = series.rolling(window=timeperiod).std()
-    upper_band = sma + (std * nbdevup)
-    lower_band = sma - (std * nbdevdn)
-    return upper_band, sma, lower_band
-
-def calculate_atr(df, timeperiod=14):
-    """ATR(Average True Range)을 계산합니다."""
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift())
-    low_close = np.abs(df['Low'] - df['Close'].shift())
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(window=timeperiod).mean()
-    return atr
-
-### 비중 계산 함수 ###
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, current_tsll_weight, params):
-    """TSLL의 목표 비중을 계산하고 조정 이유를 반환합니다."""
+# 비중 계산 로직
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, current_tsll_weight, params):
     base_weight = current_tsll_weight
-    reasons = []
-
-    # 동적 임계값 계산 (ATR 기반)
-    atr_normalized = atr / close
+    atr_normalized = atr / close if close > 0 else 0
     volume_change_strong_buy = params["volume_change_strong_buy"] * (1 + atr_normalized)
     volume_change_weak_buy = params["volume_change_weak_buy"] * (1 + atr_normalized)
     volume_change_sell = params["volume_change_sell"] * (1 + atr_normalized)
 
-    buy_conditions = {
-        f"Fear & Greed Index ≤ {params['fg_buy']}": fear_greed <= params["fg_buy"],
-        f"Daily RSI < {params['daily_rsi_buy']}": daily_rsi < params["daily_rsi_buy"],
-        "MACD > MACD Signal and MACD Signal < 0": (macd > macd_signal) and (macd_signal < 0),
-        f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
-        f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
-        "Close < Lower Bollinger Band": close < lower_band
-    }
+    buy_conditions = [
+        fear_greed <= params["fg_buy"],
+        daily_rsi < params["daily_rsi_buy"],
+        (macd > macd_signal) and (macd_signal < 0),
+        volume_change > volume_change_strong_buy,
+        volume_change > volume_change_weak_buy,
+        close < lower_band,
+        (daily_rsi_trend == "Increasing") and (close > sma200)
+    ]
 
-    sell_conditions = {
-        f"Fear & Greed Index ≥ {params['fg_sell']}": fear_greed >= params["fg_sell"],
-        f"Daily RSI > {params['daily_rsi_sell']}": daily_rsi > params["daily_rsi_sell"],
-        "MACD < MACD Signal and MACD Signal > 0": (macd < macd_signal) and (macd_signal > 0),
-        f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
-        "Close > Upper Bollinger Band": close > upper_band
-    }
+    sell_conditions = [
+        fear_greed >= params["fg_sell"],
+        daily_rsi > params["daily_rsi_sell"],
+        (macd < macd_signal) and (macd_signal > 0),
+        volume_change < volume_change_sell,
+        close > upper_band,
+        (daily_rsi_trend == "Decreasing") and (close < sma200)
+    ]
 
-    buy_reasons = [condition for condition, is_true in buy_conditions.items() if is_true]
-    sell_reasons = [condition for condition, is_true in sell_conditions.items() if is_true]
+    strong_buy_count = buy_conditions[3]
+    weak_buy_count = buy_conditions[4] and not strong_buy_count
+    other_buy_count = sum(buy_conditions[:3] + buy_conditions[5:])
+    sell_count = sum(sell_conditions)
 
-    # 세분화된 가중치 적용
     w_strong_buy = params["w_strong_buy"]
     w_weak_buy = params["w_weak_buy"]
     w_sell = params["w_sell"]
-
-    strong_buy_count = sum(1 for r in buy_reasons if "Strong Buy" in r)
-    weak_buy_count = sum(1 for r in buy_reasons if "Weak Buy" in r and "Strong Buy" not in r)
-    other_buy_count = len(buy_reasons) - strong_buy_count - weak_buy_count
-    sell_count = len(sell_reasons)
 
     buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count) * 0.1
     sell_adjustment = w_sell * sell_count * 0.1
     target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
-    reasons = []
-    if buy_reasons:
-        reasons.append("Buy Signals:")
-        for reason in buy_reasons:
-            reasons.append(f"  - {reason}")
-    if sell_reasons:
-        reasons.append("Sell Signals:")
-        for reason in sell_reasons:
-            reasons.append(f"  - {reason}")
-    if not reasons:
-        reasons.append("- No significant signals detected.")
+    return target_weight, []
 
-    return target_weight, reasons
+# 시뮬레이션 함수 (개선됨)
+def simulate_portfolio(start_date, end_date, params):
+    data = load_data(start_date, end_date)
+    if data.empty:
+        print("지정된 기간에 데이터가 없습니다.")
+        return None, None, None, None, None, None, None
 
-### 시뮬레이션 로직 ###
-def simulate_portfolio(data, optimal_params):
-    """주어진 데이터를 기반으로 포트폴리오 시뮬레이션을 실행합니다."""
-    portfolio_value = np.ones(len(data)) * initial_portfolio_value
-    current_tsll_weight = np.zeros(len(data))
-    tsla_shares = np.zeros(len(data))
-    tsll_shares = np.zeros(len(data))
+    initial_value = 100000
+    cash = initial_value  # 현금 잔액
+    holdings = {'TSLA': 0, 'TSLL': 0}  # 주식 보유량
+    current_tsll_weight = 0.0
 
     for i in range(1, len(data)):
-        # 현재 데이터
         row = data.iloc[i]
-        prev_row = data.iloc[i-1]
         fear_greed = row['y']
-        daily_rsi = row['Daily RSI']
-        weekly_rsi = row['Weekly RSI']
-        close = row['Close']
-        sma50 = row['SMA50']
-        sma200 = row['SMA200']
-        macd = row['MACD']
-        macd_signal = row['MACD_signal']
-        volume_change = row['Volume Change']
-        lower_band = row['Lower Band']
-        upper_band = row['Upper Band']
-        atr = row['ATR']
-        tsla_close = row['Close']
-        tsll_close = row['TSLL_Close']
+        daily_rsi = row['RSI_TSLA']
+        weekly_rsi = row['Weekly RSI_TSLA']
+        daily_rsi_trend = get_rsi_trend(data['RSI_TSLA'].iloc[max(0, i-10):i+1])
+        close = row['Close_TSLA']
+        sma50 = row['SMA50_TSLA']
+        sma200 = row['SMA200_TSLA']
+        macd = row['MACD_TSLA']
+        macd_signal = row['MACD_signal_TSLA']
+        volume_change = row['Volume Change_TSLA'] if not pd.isna(row['Volume Change_TSLA']) else 0
+        atr = row['ATR_TSLA']
+        lower_band = row['Lower Band_TSLA']
+        upper_band = row['Upper Band_TSLA']
 
         # 목표 TSLL 비중 계산
         target_tsll_weight, _ = get_target_tsll_weight(
-            fear_greed, daily_rsi, weekly_rsi, close, sma50, sma200, macd, macd_signal,
-            volume_change, atr, lower_band, upper_band, current_tsll_weight[i-1], optimal_params
+            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr,
+            lower_band, upper_band, current_tsll_weight, params
         )
         target_tsla_weight = 1 - target_tsll_weight
-        current_tsll_weight[i] = target_tsll_weight
 
-        # 포트폴리오 가치 계산 및 주식 수 조정
-        if i == 1:  # 초기 투자
-            tsla_shares[i] = int((target_tsla_weight * initial_portfolio_value) / tsla_close)
-            tsll_shares[i] = int((target_tsll_weight * initial_portfolio_value) / tsll_close)
-        else:
-            # 이전 날짜의 주식 수 유지
-            tsla_shares[i] = tsla_shares[i-1]
-            tsll_shares[i] = tsll_shares[i-1]
-            prev_portfolio_value = portfolio_value[i-1]
-            target_tsll_value = target_tsll_weight * prev_portfolio_value
-            current_tsll_value = tsll_shares[i] * tsll_close
-            difference = target_tsll_value - current_tsll_value
+        # 현재 포트폴리오 총 가치 계산
+        total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
 
-            if abs(difference) > 100:  # $100 이상 차이 시 조정
-                if difference > 0:
-                    tsll_shares[i] += int(difference / tsll_close)
-                else:
-                    tsll_shares[i] = max(0, tsll_shares[i] + int(difference / tsll_close))
-                tsla_shares[i] = int((prev_portfolio_value - (tsll_shares[i] * tsll_close)) / tsla_close)
+        # TSLA 조정
+        required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
+        if required_tsla_shares > holdings['TSLA']:
+            buy_shares = required_tsla_shares - holdings['TSLA']
+            cost = buy_shares * row['Close_TSLA']
+            if cash >= cost:
+                cash -= cost
+                holdings['TSLA'] += buy_shares
+            else:
+                buy_shares = int(cash / row['Close_TSLA'])
+                cost = buy_shares * row['Close_TSLA']
+                cash -= cost
+                holdings['TSLA'] += buy_shares
+        elif required_tsla_shares < holdings['TSLA']:
+            sell_shares = holdings['TSLA'] - required_tsla_shares
+            proceeds = sell_shares * row['Close_TSLA']
+            cash += proceeds
+            holdings['TSLA'] -= sell_shares
 
-        # 현재 포트폴리오 가치 계산
-        portfolio_value[i] = tsla_shares[i] * tsla_close + tsll_shares[i] * tsll_close
+        # TSLL 조정
+        required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
+        if required_tsll_shares > holdings['TSLL']:
+            buy_shares = required_tsll_shares - holdings['TSLL']
+            cost = buy_shares * row['Close_TSLL']
+            if cash >= cost:
+                cash -= cost
+                holdings['TSLL'] += buy_shares
+            else:
+                buy_shares = int(cash / row['Close_TSLL'])
+                cost = buy_shares * row['Close_TSLL']
+                cash -= cost
+                holdings['TSLL'] += buy_shares
+        elif required_tsll_shares < holdings['TSLL']:
+            sell_shares = holdings['TSLL'] - required_tsll_shares
+            proceeds = sell_shares * row['Close_TSLL']
+            cash += proceeds
+            holdings['TSLL'] -= sell_shares
 
-    # 결과 데이터프레임 생성
-    result_df = pd.DataFrame({
-        'Date': data.index,
-        'Portfolio Value': portfolio_value,
-        'TSLL Weight': current_tsll_weight,
-        'TSLA Shares': tsla_shares,
-        'TSLL Shares': tsll_shares
-    })
-    return result_df
+        # TSLL 비중 100% 보장: 남은 현금을 모두 TSLL에 투자 (단, 한 주 가격보다 적은 경우는 현금으로 유지)
+        if target_tsll_weight == 1.0 and cash >= row['Close_TSLL']:
+            buy_shares = int(cash / row['Close_TSLL'])
+            if buy_shares > 0:
+                cost = buy_shares * row['Close_TSLL']
+                cash -= cost
+                holdings['TSLL'] += buy_shares
 
-### 결과 출력 ###
-def print_simulation_results(result_df, period, start_date, end_date):
-    """시뮬레이션 결과를 출력합니다."""
-    initial_value = initial_portfolio_value
-    final_value = result_df['Portfolio Value'].iloc[-1]
-    returns = ((final_value - initial_value) / initial_value) * 100
+        # 현재 TSLL 비중 업데이트
+        total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
+        current_tsll_weight = (holdings['TSLL'] * row['Close_TSLL']) / total_value if total_value > 0 else 0
 
-    print(f"\n### Portfolio Simulation Results ({period})")
-    print(f"- Simulation Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    print(f"- Initial Portfolio Value: ${initial_value:.2f}")
-    print(f"- Final Portfolio Value: ${final_value:.2f}")
-    print(f"- Portfolio Returns: {returns:.2f}%")
+    # 최종 포트폴리오 가치 및 비중 계산
+    final_value = holdings['TSLA'] * data['Close_TSLA'].iloc[-1] + holdings['TSLL'] * data['Close_TSLL'].iloc[-1] + cash
+    final_tsll_weight = (holdings['TSLL'] * data['Close_TSLL'].iloc[-1]) / final_value if final_value > 0 else 0
+    final_tsla_weight = (holdings['TSLA'] * data['Close_TSLA'].iloc[-1]) / final_value if final_value > 0 else 0
+    cash_weight = cash / final_value if final_value > 0 else 0
 
-    # 주요 지표 테이블
-    summary = [
-        ["Date", start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')],
-        ["Portfolio Value", f"${initial_value:.2f}", f"${final_value:.2f}"],
-        ["TSLL Weight", f"{result_df['TSLL Weight'].iloc[0]*100:.2f}%", f"{result_df['TSLL Weight'].iloc[-1]*100:.2f}%"],
-        ["TSLA Shares", int(result_df['TSLA Shares'].iloc[0]), int(result_df['TSLA Shares'].iloc[-1])],
-        ["TSLL Shares", int(result_df['TSLL Shares'].iloc[0]), int(result_df['TSLL Shares'].iloc[-1])]
-    ]
-    print("\n### Summary Table")
-    print(tabulate(summary, headers=["Metric", "Start", "End"], tablefmt="fancy_grid"))
+    return initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, data['Close_TSLA'].iloc[-1], data['Close_TSLL'].iloc[-1]
 
-### 메인 함수 ###
+# 메인 함수
 def main():
     parser = argparse.ArgumentParser(description="Portfolio Simulation")
-    parser.add_argument('--period', type=str, choices=['1M', '3M', '6M', '1Y'], required=True, help="Simulation period: 1M, 3M, 6M, or 1Y")
-    parser.add_argument('--start_date', type=str, help="Start date for simulation (YYYY-MM-DD). If not provided, uses default end date.")
-    parser.add_argument('--opt', type=str, default="optimal_params.json", help="Path to optimal parameters JSON file")
+    parser.add_argument('--start_date', type=str, help="Start date for simulation (YYYY-MM-DD)")
+    parser.add_argument('--days', type=int, help="Number of days for simulation")
+
     args = parser.parse_args()
+    params = load_params()
 
-    # 최적 파라미터 로드
-    optimal_params = load_optimal_params(args.opt)
-    print(f"Using optimal parameters from {args.opt}: {optimal_params}")
+    if args.start_date:
+        start_date = pd.to_datetime(args.start_date)
+        end_date = start_date + timedelta(days=args.days if args.days else 180)
+    else:
+        if args.days:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=args.days)
+        else:
+            print("Please specify either --start_date or --days.")
+            return
 
-    # 데이터 로드 및 준비
-    print("데이터 로드 및 전처리 중...")
-    data, start_date, end_date = load_and_prepare_data(args.period, args.start_date)
-    if data.empty:
-        print("선택한 기간에 데이터가 없습니다. 프로그램을 종료합니다.")
+    initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close = simulate_portfolio(start_date, end_date, params)
+
+    if initial_value is None:
         return
 
-    # 시뮬레이션 실행
-    print(f"\n{args.period} 기간에 대한 포트폴리오 시뮬레이션 시작...")
-    result_df = simulate_portfolio(data, optimal_params)
+    print(f"\n### Portfolio Simulation Results ({args.days if args.days else 180} days)")
+    print(f"- Simulation Period: {start_date.date()} to {end_date.date()}")
+    print(f"- Initial Portfolio Value: ${initial_value:.2f}")
+    print(f"- Final Portfolio Value: ${final_value:.2f}")
+    print(f"- Portfolio Returns: {(final_value - initial_value) / initial_value:.2%}")
 
-    # 결과 출력
-    print_simulation_results(result_df, args.period, start_date, end_date)
+    print(f"\n### Current Stock Price ({end_date.date()})")
+    print(f"- **TSLA Close**: ${tsla_close:.2f}")
+    print(f"- **TSLL Close**: ${tsll_close:.2f}")
 
-    # 로그 저장
-    log_filename = f"simulation_log_{args.period}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
-    result_df.to_csv(log_filename, index=False)
-    print(f"시뮬레이션 로그가 '{log_filename}'에 저장되었습니다.")
+    table = [
+        ["Date", start_date.date(), end_date.date()],
+        ["Portfolio Value", f"${initial_value:.2f}", f"${final_value:.2f}"],
+        ["TSLL Weight", "0.00%", f"{final_tsll_weight*100:.2f}%"],
+        ["TSLA Weight", "0.00%", f"{final_tsla_weight*100:.2f}%"],
+        ["Cash Weight", "100.00%", f"{cash_weight*100:.2f}%"],
+        ["Cash Amount", f"${initial_value:.2f}", f"${cash:.2f}"],
+        ["TSLA Shares", 0, holdings['TSLA']],
+        ["TSLL Shares", 0, holdings['TSLL']]
+    ]
+    print("\n### Summary Table")
+    print(tabulate(table, headers=["Metric", "Start", "End"], tablefmt="fancy_grid"))
 
 if __name__ == "__main__":
     main()
