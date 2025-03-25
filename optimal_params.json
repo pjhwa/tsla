@@ -12,3 +12,18 @@
     "w_weak_buy": 1.0,
     "w_sell": 0.5
 }
+# GA 백테스트 결과 
+{
+    "fg_buy": 9.531317879833514, 
+    "fg_sell": 67.08588044016022, 
+    "daily_rsi_buy": 22.634096317766712, 
+    "daily_rsi_sell": 80.69626073561423, 
+    "weekly_rsi_buy": 35.92974481104716, 
+    "weekly_rsi_sell": 71.13307047142538, 
+    "volume_change_strong_buy": 0.2204410586078111, 
+    "volume_change_weak_buy": 0.7182030142178484, 
+    "volume_change_sell": -3.2444337899817715, 
+    "w_strong_buy": 4.429577073509936, 
+    "w_weak_buy": 0.2679656534414221, 
+    "w_sell": 1.3750493971925035
+}
