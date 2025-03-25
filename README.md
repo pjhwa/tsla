@@ -51,7 +51,7 @@ pip install yfinance pandas requests scipy tabulate
 
 ### `transactions.txt` (선택 사항)
   - 거래 내역을 기록한 텍스트 파일입니다. 
-  - 형식: 날짜 종목 액션 주식수 주가 (예: 2025/1/1 TSLL hold 3705 23.65)
+  - 형식: 날짜 종목 액션 주식수 주가 (예: 2025/3/1 TSLL hold 5000 12.33)
   - hold: 초기 보유량, buy: 매수, sell: 매도.
   - 파일이 없으면 초기 자산 $100,000으로 가정합니다.
 ### `optimal_params.json` (선택 사항)
@@ -65,11 +65,14 @@ pip install yfinance pandas requests scipy tabulate
         "daily_rsi_sell": 70,
         "weekly_rsi_buy": 40,
         "weekly_rsi_sell": 60,
-        "volume_change_buy": 0.1,
-        "volume_change_sell": -0.1,
-        "w_buy": 1.5,
-        "w_sell": 1.0
-    }
+        "volume_change_strong_buy": 0.5,  # 강한 Buy: 50% 이상 증가
+        "volume_change_weak_buy": 0.2,    # 약한 Buy: 20% 이상 증가
+        "volume_change_sell": -0.2,       # Sell: 20% 이상 감소
+        "w_strong_buy": 2.0,              # 강한 Buy 가중치
+        "w_weak_buy": 1.0,                # 약한 Buy 가중치
+        "w_sell": 1.0                     # Sell 가중치
+        }
+
     ```
 
 ## Market Indexes and Analysis Logic
@@ -115,55 +118,55 @@ pip install yfinance pandas requests scipy tabulate
 
 ### 예시 출력
 ```
-### Market Indicators (as of 2025-03-21)
+### Market Indicators (as of 2025-03-24)
 ╒══════════════════════╤═════════╤═══════════════╕
 │ Indicator            │ Value   │ Trend/Notes   │
 ╞══════════════════════╪═════════╪═══════════════╡
-│ Fear & Greed Index   │ 20.00   │ -             │
+│ Fear & Greed Index   │ 27.86   │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ Daily RSI            │ 28.50   │ Increasing    │
+│ Daily RSI            │ 51.72   │ Increasing    │
 ├──────────────────────┼─────────┼───────────────┤
-│ Weekly RSI           │ 35.00   │ -             │
+│ Weekly RSI           │ 25.12   │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ TSLA Close           │ $250.00 │ -             │
+│ TSLA Close           │ $278.39 │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ SMA50                │ $300.00 │ -             │
+│ SMA50                │ $332.99 │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ SMA200               │ $280.00 │ -             │
+│ SMA200               │ $284.69 │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ Upper Bollinger Band │ $320.00 │ -             │
+│ Upper Bollinger Band │ $308.83 │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ Lower Bollinger Band │ $200.00 │ -             │
+│ Lower Bollinger Band │ $209.62 │ -             │
 ├──────────────────────┼─────────┼───────────────┤
-│ Volume Change        │ 25.00%  │ -             │
+│ Volume Change        │ 26.36%  │ -             │
+├──────────────────────┼─────────┼───────────────┤
+│ ATR                  │ $18.49  │ -             │
 ╘══════════════════════╧═════════╧═══════════════╛
 
 ### Current Stock Prices
-- **TSLA Close**: $250.00  
-- **TSLL Close**: $10.00
+- **TSLA Close**: $278.39
+- **TSLL Close**: $11.16
 
 ### Current Portfolio
-- Initial Investment: $90,000.00  
-- TSLA: 80 shares, value: $20,000.00  
-- TSLL: 2000 shares, value: $20,000.00  
-- Total Portfolio Value: $40,000.00  
-- TSLA Weight: 50.00%  
-- TSLL Weight: 50.00%  
-- Portfolio Returns: -55.56%
+- Initial Investment: $90000.00
+- TSLA: 0 shares, value: $0.00
+- TSLL: 5000 shares, value: $60000.00
+- Total Portfolio Value: $60000.00
+- TSLA Weight: 0.00%
+- TSLL Weight: 100.00%
+- Portfolio Returns: -33.33%
 
 ### Recommended Portfolio Weights
-- **TSLA Weight**: 20% (approx. 32 shares)  
-- **TSLL Weight**: 80% (approx. 3200 shares)
+- **TSLA Weight**: 0% (approx. 0 shares)
+- **TSLL Weight**: 100% (approx. 5000 shares)
 
 ### Portfolio Adjustment Suggestion
- - Buy TSLL: $12,000.00 (approx. 1200 shares)
+ - No significant adjustment needed.
 
 ### Adjustment Reasons
-Buy Signals:  
-  - Fear & Greed Index ≤ 25  
-  - Daily RSI < 30  
-  - MACD > MACD Signal and MACD Signal < 0  
-  - Volume Change > 0.10
+Buy Signals:
+  - MACD > MACD Signal and MACD Signal < 0
+  - Volume Change > 0.24 (Strong Buy)
 ```
 
 ## 백테스트
