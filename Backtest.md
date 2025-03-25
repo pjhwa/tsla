@@ -1,4 +1,4 @@
-# Portfolio Optimization using Backtesting
+# Portfolio Optimization using Backtesting (`backtest.py`)
 
 이 프로젝트는 과거 주식 데이터를 활용하여 포트폴리오를 최적화하는 백테스팅 도구입니다. TSLA와 TSLL 주식 데이터를 기반으로 기술적 지표를 계산하고, Grid Search, 유전 알고리즘(GA), 베이지안 최적화(Bayesian Optimization) 등의 방법을 통해 최적의 매수/매도 파라미터를 탐색합니다. 멀티프로세싱을 지원하여 계산 성능을 극대화하며, 결과를 로그 파일과 JSON 형식으로 저장합니다.
 
