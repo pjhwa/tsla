@@ -1,12 +1,12 @@
 {
-    "daily_rsi_buy": 49.47970054265932, 
-    "daily_rsi_sell": 74.20245423755985, 
-    "weekly_rsi_buy": 50, 
-    "weekly_rsi_sell": 85.95381768656104, 
-    "fg_buy": 50, 
-    "fg_sell": 100, 
-    "volume_change_buy": -1.0, 
-    "volume_change_sell": 0.16481778240323272, 
+    "daily_rsi_buy": 32, 
+    "daily_rsi_sell": 76, 
+    "weekly_rsi_buy": 40, 
+    "weekly_rsi_sell": 80, 
+    "fg_buy": 30, 
+    "fg_sell": 88, 
+    "volume_change_buy": -0.5, 
+    "volume_change_sell": 0.5, 
     "w_buy": 3.0, 
-    "w_sell": 2.123983464593196
+    "w_sell": 0.5
 }
