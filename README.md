@@ -1,4 +1,4 @@
-# Portfolio Pulse
+# Portfolio Pulse (`portfolio_pulse.py`)
 
 ## Overview
 이 프로그램은 TSLA와 TSLL 주식으로 구성된 포트폴리오를 관리하며, 다양한 시장 지표를 분석하여 수익률을 극대화할 수 있는 최적의 비중 조정을 제안합니다. Fear & Greed Index, RSI, MACD, 볼린저 밴드 등의 지표를 활용해 동적으로 포트폴리오를 조정하며, 거래 내역이 없는 경우 초기 자산 $100,000을 기준으로 추천을 제공합니다.
