@@ -27,10 +27,12 @@ def load_optimal_params(file_path="optimal_params.json"):
             "daily_rsi_sell": 70,
             "weekly_rsi_buy": 40,
             "weekly_rsi_sell": 60,
-            "volume_change_buy": 0.1,
-            "volume_change_sell": -0.1,
-            "w_buy": 1.5,
-            "w_sell": 1.0
+            "volume_change_strong_buy": 0.5,  # 강한 Buy: 50% 이상 증가
+            "volume_change_weak_buy": 0.2,    # 약한 Buy: 20% 이상 증가
+            "volume_change_sell": -0.2,       # Sell: 20% 이상 감소
+            "w_strong_buy": 2.0,              # 강한 Buy 가중치
+            "w_weak_buy": 1.0,                # 약한 Buy 가중치
+            "w_sell": 1.0                     # Sell 가중치
         }
 
 ### 데이터 수집 함수 ###
@@ -58,6 +60,7 @@ def get_stock_data(ticker, period="max", interval="1d"):
         df['Upper Band'], df['Middle Band'], df['Lower Band'] = calculate_bollinger_bands(df['Close'])
         df['MACD'], df['MACD_signal'] = calculate_macd(df['Close'])
         df['Volume Change'] = df['Volume'].pct_change()
+        df['ATR'] = calculate_atr(df, timeperiod=14)  # ATR 추가
         return df
     except Exception as e:
         print(f"{ticker} 데이터 로드 오류: {e}")
@@ -105,6 +108,15 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     lower_band = sma - (std * nbdevdn)
     return upper_band, sma, lower_band
 
+def calculate_atr(df, timeperiod=14):
+    """ATR(Average True Range)을 계산합니다."""
+    high_low = df['High'] - df['Low']
+    high_close = np.abs(df['High'] - df['Close'].shift())
+    low_close = np.abs(df['Low'] - df['Close'].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(window=timeperiod).mean()
+    return atr
+
 def get_rsi_trend(rsi_series, window=10):
     """RSI의 추세를 분석합니다."""
     if len(rsi_series) < window:
@@ -135,7 +147,6 @@ def load_transactions(file_path="transactions.txt"):
             price = row['stock_price']
 
             if index == 0 and action == "hold":
-                # 첫 번째 hold 라인: 초기 투자액 계산
                 initial_investment = shares * price
                 holdings[ticker] = shares
             elif action == "buy":
@@ -148,7 +159,6 @@ def load_transactions(file_path="transactions.txt"):
                 else:
                     print(f"Insufficient shares to sell: {ticker}, {shares} shares")
 
-        # 현재 보유 중인 주식만 필터링
         current_holdings = {ticker: shares for ticker, shares in holdings.items() if shares > 0}
         return current_holdings, initial_investment
     except Exception as e:
@@ -157,28 +167,35 @@ def load_transactions(file_path="transactions.txt"):
 
 ### 포트폴리오 가치 및 수익률 계산 ###
 def calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initial_investment):
-    """현재 포트폴리오 가치, 비중, 수익률을 계산합니다. Cash는 고려하지 않습니다."""
+    """현재 포트폴리오 가치, 비중, 수익률을 계산합니다."""
     tsla_shares = current_holdings.get("TSLA", 0)
     tsll_shares = current_holdings.get("TSLL", 0)
     tsla_value = tsla_shares * tsla_close
     tsll_value = tsll_shares * tsll_close
-    total_value = tsla_value + tsll_value  # 주식 가치만 고려
+    total_value = tsla_value + tsll_value
     tsla_weight = tsla_value / total_value if total_value > 0 else 0
     tsll_weight = tsll_value / total_value if total_value > 0 else 0
     returns = ((total_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
     return total_value, tsla_value, tsll_value, tsla_weight, tsll_weight, returns
 
 ### 전략 및 비중 계산 ###
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band, current_tsll_weight, optimal_params):
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, current_tsll_weight, optimal_params):
     """TSLL의 목표 비중을 계산하고 조정 이유를 반환합니다."""
     base_weight = current_tsll_weight
     reasons = []
+
+    # 동적 임계값 계산 (ATR 기반)
+    atr_normalized = atr / close  # 가격 대비 변동성 비율
+    volume_change_strong_buy = optimal_params["volume_change_strong_buy"] * (1 + atr_normalized)
+    volume_change_weak_buy = optimal_params["volume_change_weak_buy"] * (1 + atr_normalized)
+    volume_change_sell = optimal_params["volume_change_sell"] * (1 + atr_normalized)
 
     buy_conditions = {
         f"Fear & Greed Index ≤ {optimal_params['fg_buy']}": fear_greed <= optimal_params["fg_buy"],
         f"Daily RSI < {optimal_params['daily_rsi_buy']}": daily_rsi < optimal_params["daily_rsi_buy"],
         "MACD > MACD Signal and MACD Signal < 0": (macd > macd_signal) and (macd_signal < 0),
-        f"Volume Change > {optimal_params['volume_change_buy']}": volume_change > optimal_params["volume_change_buy"],
+        f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
+        f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
         "Close < Lower Bollinger Band": close < lower_band,
         f"RSI Increasing and Close > SMA200": (daily_rsi_trend == "Increasing") and (close > sma200)
     }
@@ -187,7 +204,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         f"Fear & Greed Index ≥ {optimal_params['fg_sell']}": fear_greed >= optimal_params["fg_sell"],
         f"Daily RSI > {optimal_params['daily_rsi_sell']}": daily_rsi > optimal_params["daily_rsi_sell"],
         "MACD < MACD Signal and MACD Signal > 0": (macd < macd_signal) and (macd_signal > 0),
-        f"Volume Change < {optimal_params['volume_change_sell']}": volume_change < optimal_params["volume_change_sell"],
+        f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
         "Close > Upper Bollinger Band": close > upper_band,
         f"RSI Decreasing and Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200)
     }
@@ -195,10 +212,18 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     buy_reasons = [condition for condition, is_true in buy_conditions.items() if is_true]
     sell_reasons = [condition for condition, is_true in sell_conditions.items() if is_true]
 
-    w_buy = optimal_params["w_buy"]
+    # 세분화된 가중치 적용
+    w_strong_buy = optimal_params["w_strong_buy"]
+    w_weak_buy = optimal_params["w_weak_buy"]
     w_sell = optimal_params["w_sell"]
-    buy_adjustment = w_buy * len(buy_reasons) * 0.1
-    sell_adjustment = w_sell * len(sell_reasons) * 0.1
+
+    strong_buy_count = sum(1 for r in buy_reasons if "Strong Buy" in r)
+    weak_buy_count = sum(1 for r in buy_reasons if "Weak Buy" in r and "Strong Buy" not in r)
+    other_buy_count = len(buy_reasons) - strong_buy_count - weak_buy_count
+    sell_count = len(sell_reasons)
+
+    buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count) * 0.1
+    sell_adjustment = w_sell * sell_count * 0.1
     target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
     reasons = []
@@ -230,7 +255,7 @@ def adjust_portfolio(target_tsll_weight, current_tsll_weight, total_value, tsll_
     difference = target_tsll_value - current_tsll_value
     shares_to_adjust = int(difference / tsll_close)
 
-    if abs(difference) < 100:  # $100 미만 차이는 조정 불필요
+    if abs(difference) < 100:
         print(" - No significant adjustment needed.")
     elif difference > 0:
         print(f" - Buy TSLL: ${difference:.2f} (approx. {shares_to_adjust} shares)")
@@ -272,6 +297,7 @@ def analyze_and_recommend():
     upper_band = tsla_df['Upper Band'].iloc[-1]
     lower_band = tsla_df['Lower Band'].iloc[-1]
     volume_change = tsla_df['Volume Change'].iloc[-1]
+    atr = tsla_df['ATR'].iloc[-1]  # ATR 값 추가
 
     # 시장 지표 테이블
     indicators = [
@@ -283,7 +309,8 @@ def analyze_and_recommend():
         ["SMA200", f"${sma200:.2f}", "-"],
         ["Upper Bollinger Band", f"${upper_band:.2f}", "-"],
         ["Lower Bollinger Band", f"${lower_band:.2f}", "-"],
-        ["Volume Change", f"{volume_change:.2%}", "-"]
+        ["Volume Change", f"{volume_change:.2%}", "-"],
+        ["ATR", f"${atr:.2f}", "-"]
     ]
     print(f"\n### Market Indicators (as of {data_date})")
     print(tabulate(indicators, headers=["Indicator", "Value", "Trend/Notes"], tablefmt="fancy_grid"))
@@ -296,14 +323,12 @@ def analyze_and_recommend():
     # transactions.txt 파일 유무 확인 및 처리
     current_holdings, initial_investment = load_transactions()
     if not current_holdings:
-        # 거래 내역이 없는 경우: 초기 자산 $100,000으로 설정, 현재 TSLL 비중 0%
         total_value = initial_portfolio_value
         current_tsll_weight = 0.0
         print("\n### Current Portfolio")
         print(f"- Initial Portfolio Value: ${initial_portfolio_value:.2f}")
         print("- No holdings found. Assuming initial portfolio value for recommendations.")
     else:
-        # 거래 내역이 있는 경우: 실제 포트폴리오 계산
         total_value, tsla_value, tsll_value, current_tsla_weight, current_tsll_weight, returns = calculate_portfolio_metrics(
             current_holdings, tsla_close, tsll_close, initial_investment
         )
@@ -318,8 +343,8 @@ def analyze_and_recommend():
 
     # 시장 지표를 기반으로 목표 TSLL 비중 계산
     target_tsll_weight, reasons = get_target_tsll_weight(
-        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, lower_band, upper_band,
-        current_tsll_weight, optimal_params
+        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr,
+        lower_band, upper_band, current_tsll_weight, optimal_params
     )
     target_tsla_weight = 1 - target_tsll_weight
 
