@@ -111,13 +111,21 @@
    - `get_rsi_trend(rsi_series, window)`: RSI의 추세(상승/하락/안정)를 판단.
 
 3. **`load_params(file_path="optimal_params.json")`**:
-   - `optimal_params.json`에서 최적화된 매수/매도 파라미터를 로드. 파일이 없으면 기본값 사용:
+   - `optimal_params.json`에서 최적화된 매수/매도 파라미터를 로드. 파일이 없으면 기본값 사용.
      ```json
      {
-         "fg_buy": 25, "fg_sell": 75, "daily_rsi_buy": 30, "daily_rsi_sell": 70,
-         "weekly_rsi_buy": 40, "weekly_rsi_sell": 60, "volume_change_strong_buy": 0.5,
-         "volume_change_weak_buy": 0.2, "volume_change_sell": -0.2,
-         "w_strong_buy": 2.0, "w_weak_buy": 1.0, "w_sell": 1.0
+         "fg_buy": 25,
+         "fg_sell": 75,
+         "daily_rsi_buy": 30,
+         "daily_rsi_sell": 70,
+         "weekly_rsi_buy": 40,
+         "weekly_rsi_sell": 60,
+         "volume_change_strong_buy": 0.5,
+         "volume_change_weak_buy": 0.2,
+         "volume_change_sell": -0.2,
+         "w_strong_buy": 2.0,
+         "w_weak_buy": 1.0,
+         "w_sell": 1.0
      }
      ```
 
@@ -166,3 +174,7 @@
     - 거래량 변화율 < -0.2
     - 주가 > 볼린저 상단 밴드
     - RSI 하락 추세 & 주가 < SMA200
+
+## Disclaimer
+
+이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
