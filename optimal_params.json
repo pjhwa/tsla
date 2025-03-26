@@ -1,5 +1,5 @@
 {
-    "version": "1.0", 
+    "version": "2.0",
     "parameters": {
         "fg_buy": 25,
         "fg_sell": 75,
@@ -12,6 +12,10 @@
         "volume_change_sell": -0.2,
         "w_strong_buy": 2.0,
         "w_weak_buy": 1.0,
-        "w_sell": 1.0
+        "w_sell": 1.0,
+        "stochastic_buy": 20,
+        "stochastic_sell": 80,
+        "obv_weight": 1.0,
+        "bb_width_weight": 1.0
     }
 }
