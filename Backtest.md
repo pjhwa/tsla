@@ -23,13 +23,12 @@
   - `deap`
   - `scipy`
   - `tqdm`
-  - `yfinance` (선택사항, VIX 데이터 수집용)
 
 ### Installation
 
 1. **필수 라이브러리 설치**:
    ```bash
-   pip install pandas numpy deap scipy tqdm yfinance
+   pip install pandas numpy deap scipy tqdm
    ```
 
 2. **데이터 파일 준비**:
