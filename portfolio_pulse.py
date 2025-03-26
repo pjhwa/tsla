@@ -8,16 +8,21 @@ from tabulate import tabulate
 import json
 import csv
 import os
+import re  # 정규 표현식을 위해 추가
 
 # 초기 설정
 initial_portfolio_value = 100000  # 초기 자산 $100,000
 
 ### 최적 파라미터 로드 함수 ###
 def load_optimal_params(file_path="optimal_params.json"):
-    """JSON 파일에서 최적 파라미터를 로드합니다. 파일이 없으면 기본값을 반환합니다."""
+    """JSON 파일에서 최적 파라미터를 로드합니다. 파일이 없거나 파싱 오류가 발생하면 기본값을 반환합니다."""
     try:
         with open(file_path, "r") as f:
-            return json.load(f)
+            content = f.read()
+            # Trailing comma 제거
+            content = re.sub(r',\s*}', '}', content)
+            content = re.sub(r',\s*]', ']', content)
+            return json.loads(content)
     except FileNotFoundError:
         print("최적 파라미터 파일이 없습니다. 기본값을 사용합니다.")
         return {
@@ -27,12 +32,29 @@ def load_optimal_params(file_path="optimal_params.json"):
             "daily_rsi_sell": 70,
             "weekly_rsi_buy": 40,
             "weekly_rsi_sell": 60,
-            "volume_change_strong_buy": 0.5,  # 강한 Buy: 50% 이상 증가
-            "volume_change_weak_buy": 0.2,    # 약한 Buy: 20% 이상 증가
-            "volume_change_sell": -0.2,       # Sell: 20% 이상 감소
-            "w_strong_buy": 2.0,              # 강한 Buy 가중치
-            "w_weak_buy": 1.0,                # 약한 Buy 가중치
-            "w_sell": 1.0                     # Sell 가중치
+            "volume_change_strong_buy": 0.5,
+            "volume_change_weak_buy": 0.2,
+            "volume_change_sell": -0.2,
+            "w_strong_buy": 2.0,
+            "w_weak_buy": 1.0,
+            "w_sell": 1.0
+        }
+    except json.JSONDecodeError as e:
+        print(f"JSON 파싱 오류: {e}")
+        print("기본 파라미터를 사용합니다.")
+        return {
+            "fg_buy": 25,
+            "fg_sell": 75,
+            "daily_rsi_buy": 30,
+            "daily_rsi_sell": 70,
+            "weekly_rsi_buy": 40,
+            "weekly_rsi_sell": 60,
+            "volume_change_strong_buy": 0.5,
+            "volume_change_weak_buy": 0.2,
+            "volume_change_sell": -0.2,
+            "w_strong_buy": 2.0,
+            "w_weak_buy": 1.0,
+            "w_sell": 1.0
         }
 
 ### 데이터 수집 함수 ###
@@ -44,15 +66,21 @@ def get_fear_greed_index():
     response = requests.get(url, headers=headers, timeout=10)
     data = response.json()
     fg_df = pd.DataFrame(data["fear_and_greed_historical"]["data"])
-    fg_df['x'] = pd.to_datetime(fg_df['x'], unit='ms').dt.date
+    # 날짜 형식 통일
+    fg_df['x'] = pd.to_datetime(fg_df['x'], unit='ms', errors='coerce').dt.date
     fg_df = fg_df.rename(columns={'x': 'Date', 'y': 'Fear & Greed Index'})
+    # 결측치 보간
+    fg_df['Fear & Greed Index'] = fg_df['Fear & Greed Index'].interpolate(method='linear')
     return fg_df['Fear & Greed Index'].iloc[-1]
 
 def get_stock_data(ticker, period="max", interval="1d"):
     """주식 데이터를 가져와 기술적 지표를 계산합니다."""
     try:
         df = yf.Ticker(ticker).history(period=period, interval=interval)
-        df = df.dropna(subset=['Close'])
+        # 날짜 형식 통일 (인덱스 처리)
+        df.index = pd.to_datetime(df.index, errors='coerce')
+        # 결측치 보간
+        df = df.interpolate(method='linear')
         df['Close'] = df['Close'].round(2)
         df['RSI'] = calculate_rsi(df['Close'], timeperiod=14)
         df['SMA50'] = calculate_sma(df['Close'], timeperiod=50)
@@ -70,7 +98,10 @@ def get_weekly_rsi(ticker, period="max"):
     """주간 RSI를 계산합니다."""
     try:
         weekly_df = yf.Ticker(ticker).history(period=period, interval="1wk")
-        weekly_df = weekly_df.dropna(subset=['Close'])
+        # 날짜 형식 통일
+        weekly_df.index = pd.to_datetime(weekly_df.index, errors='coerce')
+        # 결측치 보간
+        weekly_df = weekly_df.interpolate(method='linear')
         weekly_df['Close'] = weekly_df['Close'].round(2)
         weekly_df['RSI'] = calculate_rsi(weekly_df['Close'], timeperiod=14)
         return weekly_df['RSI'].iloc[-1]
@@ -86,11 +117,13 @@ def calculate_rsi(series, timeperiod=14):
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
-    return rsi
+    # 결측치 보간
+    return rsi.interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
     """단순 이동평균(SMA)을 계산합니다."""
-    return series.rolling(window=timeperiod).mean()
+    sma = series.rolling(window=timeperiod).mean()
+    return sma.interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     """MACD와 신호선을 계산합니다."""
@@ -98,7 +131,7 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
     macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
-    return macd, macd_signal
+    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     """볼린저 밴드를 계산합니다."""
@@ -106,7 +139,7 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     std = series.rolling(window=timeperiod).std()
     upper_band = sma + (std * nbdevup)
     lower_band = sma - (std * nbdevdn)
-    return upper_band, sma, lower_band
+    return upper_band.interpolate(method='linear'), sma.interpolate(method='linear'), lower_band.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
     """ATR(Average True Range)을 계산합니다."""
@@ -115,7 +148,7 @@ def calculate_atr(df, timeperiod=14):
     low_close = np.abs(df['Low'] - df['Close'].shift())
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     atr = tr.rolling(window=timeperiod).mean()
-    return atr
+    return atr.interpolate(method='linear')
 
 def get_rsi_trend(rsi_series, window=10):
     """RSI의 추세를 분석합니다."""
@@ -137,6 +170,8 @@ def load_transactions(file_path="transactions.txt"):
 
     try:
         transactions_df = pd.read_csv(file_path, sep='\s+', names=["date", "ticker", "action", "shares", "stock_price"])
+        # 날짜 형식 통일
+        transactions_df['date'] = pd.to_datetime(transactions_df['date'], errors='coerce')
         holdings = {}
         initial_investment = 0
 
