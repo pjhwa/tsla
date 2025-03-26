@@ -10,20 +10,34 @@ from tabulate import tabulate
 # 데이터 로드 및 전처리
 def load_data(start_date, end_date):
     """지정된 기간의 주가 데이터와 공포탐욕지수를 로드하고 전처리합니다."""
-    fear_greed_df = pd.read_csv('fear_greed_2years.csv', parse_dates=['date'])
-    tsla_df = pd.read_csv('TSLA-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
-    tsll_df = pd.read_csv('TSLL-history-2y.csv', parse_dates=['Date'], date_format='%m/%d/%Y')
+    fear_greed_df = pd.read_csv('fear_greed_2years.csv')
+    tsla_df = pd.read_csv('TSLA-history-2y.csv')
+    tsll_df = pd.read_csv('TSLL-history-2y.csv')
 
+    # 날짜 형식 통일
+    fear_greed_df['date'] = pd.to_datetime(fear_greed_df['date'], errors='coerce')
+    tsla_df['Date'] = pd.to_datetime(tsla_df['Date'], errors='coerce')
+    tsll_df['Date'] = pd.to_datetime(tsll_df['Date'], errors='coerce')
+
+    # Volume 열의 쉼표 제거 및 float 변환
     tsla_df['Volume'] = tsla_df['Volume'].str.replace(',', '').astype(float)
     tsll_df['Volume'] = tsll_df['Volume'].str.replace(',', '').astype(float)
 
+    # 데이터 병합
     data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
     data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
     data.set_index('Date', inplace=True)
-    data = data.dropna()
 
+    # 결측치 보간 전 열 타입 변환
+    data = data.apply(pd.to_numeric, errors='coerce')
+
+    # 결측치 보간 (선형 보간)
+    data = data.interpolate(method='linear')
+
+    # 지정된 기간으로 필터링
     data = data[(data.index >= start_date) & (data.index <= end_date)]
 
+    # 지표 계산
     data['RSI_TSLA'] = calculate_rsi(data['Close_TSLA'], 14)
     data['SMA50_TSLA'] = calculate_sma(data['Close_TSLA'], 50)
     data['SMA200_TSLA'] = calculate_sma(data['Close_TSLA'], 200)
@@ -42,24 +56,25 @@ def calculate_rsi(series, timeperiod=14):
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return rsi.interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    return series.rolling(window=timeperiod).mean()
+    sma = series.rolling(window=timeperiod).mean()
+    return sma.interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
     macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
-    return macd, macd_signal
+    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper_band = sma + (std * nbdevup)
     lower_band = sma - (std * nbdevdn)
-    return upper_band, sma, lower_band
+    return upper_band.interpolate(method='linear'), sma.interpolate(method='linear'), lower_band.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
     high_low = df['High_TSLA'] - df['Low_TSLA']
@@ -67,7 +82,7 @@ def calculate_atr(df, timeperiod=14):
     low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     atr = tr.rolling(window=timeperiod).mean()
-    return atr
+    return atr.interpolate(method='linear')
 
 def get_rsi_trend(rsi_series, window=10):
     if len(rsi_series) < window:
@@ -143,7 +158,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
 
     return target_weight, []
 
-# 시뮬레이션 함수 (개선됨)
+# 시뮬레이션 함수
 def simulate_portfolio(start_date, end_date, params):
     data = load_data(start_date, end_date)
     if data.empty:
