@@ -65,12 +65,12 @@ pip install yfinance pandas requests scipy tabulate
         "daily_rsi_sell": 70,
         "weekly_rsi_buy": 40,
         "weekly_rsi_sell": 60,
-        "volume_change_strong_buy": 0.5,  # 강한 Buy: 50% 이상 증가
-        "volume_change_weak_buy": 0.2,    # 약한 Buy: 20% 이상 증가
-        "volume_change_sell": -0.2,       # Sell: 20% 이상 감소
-        "w_strong_buy": 2.0,              # 강한 Buy 가중치
-        "w_weak_buy": 1.0,                # 약한 Buy 가중치
-        "w_sell": 1.0                     # Sell 가중치
+        "volume_change_strong_buy": 0.5,
+        "volume_change_weak_buy": 0.2,
+        "volume_change_sell": -0.2,
+        "w_strong_buy": 2.0,
+        "w_weak_buy": 1.0,
+        "w_sell": 1.0
         }
 
     ```
@@ -106,6 +106,7 @@ pip install yfinance pandas requests scipy tabulate
 - **매수 신호**가 발생할 때마다 비중을 w_buy * 0.1 (기본값: 1.5 * 0.1 = 0.15)만큼 증가시키고, **매도 신호**가 발생할 때마다 w_sell * 0.1 (기본값: 1.0 * 0.1 = 0.1)만큼 감소시킵니다.
 - 예: 매수 신호 2개 발생 시 비중이 1.5 * 2 * 0.1 = 0.3만큼 증가합니다.
 - 목표 비중은 0%에서 100% 사이로 제한됩니다.
+- 자세한 비중 조정의 로직은 **Adjustment_Logic.md** 파일을 참고하세요.
 
 ## 출력 및 결과 해석
 프로그램은 다음 정보를 출력합니다.
