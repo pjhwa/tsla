@@ -47,12 +47,13 @@ def calculate_sma(series, timeperiod=20):
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD와 신호선을 계산합니다."""
+    """MACD, 신호선, 그리고 MACD Histogram을 계산합니다."""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
     macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
-    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear')
+    macd_histogram = macd - macd_signal
+    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     """볼린저 밴드를 계산합니다."""
@@ -106,13 +107,12 @@ def init_process():
     upper_band, _, lower_band = calculate_bollinger_bands(data['Close_TSLA'])
     data['Upper Band_TSLA'] = upper_band
     data['Lower Band_TSLA'] = lower_band
-    data['MACD_TSLA'], data['MACD_signal_TSLA'] = calculate_macd(data['Close_TSLA'])
+    data['MACD_TSLA'], data['MACD_signal_TSLA'], data['MACD_histogram_TSLA'] = calculate_macd(data['Close_TSLA'])
     data['Volume Change_TSLA'] = data['Volume_TSLA'].pct_change()
     data['ATR_TSLA'] = calculate_atr(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']], 14)
     data['Stochastic_K_TSLA'], data['Stochastic_D_TSLA'] = calculate_stochastic(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']])
     data['OBV_TSLA'] = calculate_obv(data['Close_TSLA'], data['Volume_TSLA'])
     data['BB_width_TSLA'] = (data['Upper Band_TSLA'] - data['Lower Band_TSLA']) / data['SMA50_TSLA']
-    data['MACD_histogram_TSLA'] = data['MACD_TSLA'] - data['MACD_signal_TSLA']
 
     weekly_rsi = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14)
     data['Weekly RSI_TSLA'] = weekly_rsi.reindex(data.index, method='ffill').fillna(50)
@@ -133,17 +133,17 @@ def get_dynamic_param_ranges(volatility):
     """변동성에 따라 동적 파라미터 범위를 설정합니다."""
     if volatility > 30:  # 고변동성
         return [
-            (15, 50), (50, 90), (20, 50), (60, 90), (25, 50), (60, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
-            (0.2, 1.0), (0.05, 0.5), (-1.0, -0.05),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
+            (15, 50), (50, 90), (20, 50), (60, 80), (25, 50), (60, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
+            (0.2, 1.0), (0.05, 0.5), (-0.5, -0.05),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
             (1.0, 3.0), (0.5, 2.0), (0.5, 2.0),  # w_strong_buy, w_weak_buy, w_sell
-            (20, 40), (60, 80),  # stochastic_buy, stochastic_sell
+            (20, 40), (70, 80),  # stochastic_buy, stochastic_sell
             (0.5, 2.0), (0.5, 2.0)  # obv_weight, bb_width_weight
         ]
     return [  # 저변동성
-        (20, 40), (60, 85), (25, 40), (65, 85), (30, 40), (65, 85),
-        (0.3, 1.0), (0.1, 0.5), (-1.0, -0.1),
+        (20, 40), (60, 85), (25, 40), (65, 80), (30, 40), (65, 85),
+        (0.3, 1.0), (0.1, 0.5), (-0.5, -0.1),
         (1.5, 3.0), (0.5, 2.0), (0.5, 2.0),
-        (20, 40), (60, 80),
+        (20, 40), (70, 80),
         (0.5, 2.0), (0.5, 2.0)
     ]
 
@@ -195,7 +195,8 @@ def calculate_fitness(portfolio_values):
     std_dev = np.std(returns)
     sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
     max_drawdown = calculate_max_drawdown(portfolio_values)
-    return sharpe_ratio / (1 + max_drawdown)  # Calmar Ratio 기반
+    total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
+    return sharpe_ratio * (1 + total_return) / (1 + max_drawdown)  # 개선된 피트니스 함수
 
 def evaluate(individual, data_subset=None):
     """롤링 윈도우 백테스팅을 위한 평가 함수입니다."""
