@@ -6,7 +6,6 @@ import numpy as np
 from scipy.stats import linregress
 from tabulate import tabulate
 import json
-import csv
 import os
 
 # Initial settings
@@ -36,7 +35,7 @@ def get_fear_greed_index():
     return fg_df['Fear & Greed Index'].iloc[-1]
 
 def get_stock_data(ticker, period="max", interval="1d"):
-    """Fetches stock data and calculates technical indicators."""
+    """Fetches stock data and calculates technical indicators including MACD Histogram."""
     try:
         df = yf.Ticker(ticker).history(period=period, interval=interval)
         df.index = pd.to_datetime(df.index, errors='coerce')
@@ -45,6 +44,7 @@ def get_stock_data(ticker, period="max", interval="1d"):
         df['ATR'] = calculate_atr(df, 14)
         df['RSI'] = calculate_rsi(df['Close'], 14)
         df['MACD'], df['MACD_signal'] = calculate_macd(df['Close'], 12, 26, 9)
+        df['MACD_histogram'] = df['MACD'] - df['MACD_signal']  # MACD Histogram 계산
         df['SMA50'] = calculate_sma(df['Close'], 50)
         df['SMA200'] = calculate_sma(df['Close'], 200)
         df['Upper Band'], df['Middle Band'], df['Lower Band'] = calculate_bollinger_bands(df['Close'])
@@ -233,8 +233,8 @@ def calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initia
     returns = ((total_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
     return total_value, tsla_value, tsll_value, tsla_weight, tsll_weight, returns
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, optimal_params):
-    """Calculates the target weight for TSLL."""
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, optimal_params):
+    """Calculates the target weight for TSLL including MACD Histogram."""
     base_weight = current_tsll_weight
     atr_normalized = atr / close if close > 0 else 0
     volume_change_strong_buy = optimal_params["volume_change_strong_buy"] * (1 + atr_normalized)
@@ -246,6 +246,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         f"Daily RSI < {optimal_params['daily_rsi_buy']}": daily_rsi < optimal_params["daily_rsi_buy"],
         f"Weekly RSI < {optimal_params['weekly_rsi_buy']}": weekly_rsi < optimal_params["weekly_rsi_buy"],
         "MACD > Signal (Signal < 0)": (macd > macd_signal) and (macd_signal < 0),
+        "MACD Histogram > 0": macd_histogram > 0,  # 매수 조건에 MACD Histogram 추가
         f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
         f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
         "Close < Lower Band": close < lower_band,
@@ -260,6 +261,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         f"Daily RSI > {optimal_params['daily_rsi_sell']}": daily_rsi > optimal_params["daily_rsi_sell"],
         f"Weekly RSI > {optimal_params['weekly_rsi_sell']}": weekly_rsi > optimal_params["weekly_rsi_sell"],
         "MACD < Signal (Signal > 0)": (macd < macd_signal) and (macd_signal > 0),
+        "MACD Histogram < 0": macd_histogram < 0,  # 매도 조건에 MACD Histogram 추가
         f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
         "Close > Upper Band": close > upper_band,
         "RSI Decreasing & Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200),
@@ -334,6 +336,7 @@ def analyze_and_recommend():
     daily_rsi_trend = get_rsi_trend(tsla_df['RSI'].tail(10))
     sma50, sma200 = tsla_df['SMA50'].iloc[-1], tsla_df['SMA200'].iloc[-1]
     macd, macd_signal = tsla_df['MACD'].iloc[-1], tsla_df['MACD_signal'].iloc[-1]
+    macd_histogram = tsla_df['MACD_histogram'].iloc[-1]  # MACD Histogram 추출
     upper_band, lower_band = tsla_df['Upper Band'].iloc[-1], tsla_df['Lower Band'].iloc[-1]
     volume_change = tsla_df['Volume Change'].iloc[-1]
     atr = tsla_df['ATR'].iloc[-1]
@@ -375,7 +378,8 @@ def analyze_and_recommend():
         ["Stochastic %K", f"{stochastic_k:.2f}", stochastic_trend],
         ["Stochastic %D", f"{stochastic_d:.2f}", "N/A"],
         ["OBV", f"{obv:.0f}", obv_trend],
-        ["BB Width", f"{bb_width:.4f}", bb_width_note]
+        ["BB Width", f"{bb_width:.4f}", bb_width_note],
+        ["MACD Histogram", f"{macd_histogram:.2f}", "N/A"]  # 지표 테이블에 MACD Histogram 추가
     ]
     print(f"\n### Market Indicators (as of {data_date})")
     print(tabulate(indicators, headers=["Indicator", "Value", "Trend/Notes"], tablefmt="fancy_grid"))
@@ -411,7 +415,7 @@ def analyze_and_recommend():
 
     # Calculate target weights
     target_tsll_weight, reasons = get_target_tsll_weight(
-        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma50, sma200, macd, macd_signal,
+        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma50, sma200, macd, macd_signal, macd_histogram,
         volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width,
         tsll_weight, optimal_params
     )
