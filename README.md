@@ -104,7 +104,7 @@ pip install yfinance pandas requests scipy tabulate numpy
 
 - **Fear & Greed Index**: 시장의 공포와 탐욕 수준을 측정.
 - **RSI (Relative Strength Index)**: 일일 및 주간 RSI로 과매수/과매도 상태를 평가.
-- **MACD (Moving Average Convergence Divergence)**: 주가 모멘텀 분석.
+- **MACD (Moving Average Convergence Divergence)**: 모멘텀 분석(MACD Histogram 포함).
 - **Bollinger Bands**: 주가 변동성 측정.
 - **Stochastic Oscillator**: 단기 과매수/과매도 상태 분석.
 - **OBV (On-Balance Volume)**: 거래량 기반 추세 확인.
@@ -120,6 +120,7 @@ pip install yfinance pandas requests scipy tabulate numpy
 - Daily RSI < `daily_rsi_buy`
 - Weekly RSI < `weekly_rsi_buy`
 - MACD > MACD Signal and MACD Signal < 0
+- MACD Histogram > 0
 - Volume Change > `volume_change_strong_buy` (Strong Buy)
 - Volume Change > `volume_change_weak_buy` (Weak Buy)
 - Close < Lower Bollinger Band
@@ -133,6 +134,7 @@ pip install yfinance pandas requests scipy tabulate numpy
 - Daily RSI > `daily_rsi_sell`
 - Weekly RSI > `weekly_rsi_sell`
 - MACD < MACD Signal and MACD Signal > 0
+- MACD Histogram < 0
 - Volume Change < `volume_change_sell`
 - Close > Upper Bollinger Band
 - RSI Decreasing and Close < SMA200
@@ -152,7 +154,7 @@ pip install yfinance pandas requests scipy tabulate numpy
 ---
 
 ## Output and Interpretation
-프로그램은 다음 정보를 출력합니다:
+프로그램은 다음 정보를 출력합니다.
 
 ### 예시 출력
 ```
@@ -187,6 +189,8 @@ pip install yfinance pandas requests scipy tabulate numpy
 │ OBV                  │ 1234567 │ Increasing          │
 ├──────────────────────┼─────────┼─────────────────────┤
 │ BB Width             │ 0.1023  │ Medium              │
+├──────────────────────┼─────────┼─────────────────────┤
+│ MACD Histogram       │ 8.13    │ N/A                 │
 ╘══════════════════════╧═════════╧═════════════════════╛
 
 ### Current Stock Prices
@@ -211,7 +215,9 @@ pip install yfinance pandas requests scipy tabulate numpy
 ### Adjustment Reasons
 Buy Signals (Potential increase in TSLL weight):
   - MACD > Signal (Signal < 0)
+  - MACD Histogram > 0
   - Volume Change > 0.24 (Strong Buy)
+  - OBV Increasing
 ```
 
 ---
