@@ -40,12 +40,13 @@ def calculate_sma(series, timeperiod=20):
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD와 신호선을 계산합니다."""
+    """MACD, 신호선, 그리고 MACD Histogram을 계산합니다."""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
     macd_signal = macd.ewm(span=signalperiod, adjust=False).mean()
-    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear')
+    macd_histogram = macd - macd_signal  # MACD Histogram 계산
+    return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     """볼린저 밴드를 계산합니다."""
@@ -140,7 +141,7 @@ def load_params(file_path="optimal_params.json"):
         print(f"경고: {file_path} 파일이 손상되었거나 형식이 잘못되었습니다. 기본 파라미터를 사용합니다. 오류: {e}")
         return default_params
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, params):
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, params):
     """TSLL의 목표 비중을 계산합니다."""
     base_weight = current_tsll_weight
     atr_normalized = atr / close if close > 0 else 0
@@ -153,6 +154,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         daily_rsi < params["daily_rsi_buy"],
         weekly_rsi < params["weekly_rsi_buy"],
         (macd > macd_signal) and (macd_signal < 0),
+        macd_histogram > 0,  # MACD Histogram 매수 조건 추가
         volume_change > volume_change_strong_buy,
         volume_change > volume_change_weak_buy,
         close < lower_band,
@@ -167,6 +169,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         daily_rsi > params["daily_rsi_sell"],
         weekly_rsi > params["weekly_rsi_sell"],
         (macd < macd_signal) and (macd_signal > 0),
+        macd_histogram < 0,  # MACD Histogram 매도 조건 추가
         volume_change < volume_change_sell,
         close > upper_band,
         (daily_rsi_trend == "Decreasing") and (close < sma200),
@@ -175,14 +178,14 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         bb_width > 0.15
     ]
 
-    strong_buy_count = buy_conditions[4]
-    weak_buy_count = buy_conditions[5] and not strong_buy_count
-    other_buy_count = sum(buy_conditions[:4] + buy_conditions[6:10])
-    sell_count = sum(sell_conditions[:6])
-    obv_buy = buy_conditions[9]
-    obv_sell = sell_conditions[8]
-    bb_width_buy = buy_conditions[10]
-    bb_width_sell = sell_conditions[9]
+    strong_buy_count = buy_conditions[5]  # volume_change > volume_change_strong_buy
+    weak_buy_count = buy_conditions[6] and not strong_buy_count  # volume_change > volume_change_weak_buy
+    other_buy_count = sum(buy_conditions[:4] + buy_conditions[7:11])  # 기타 매수 조건
+    sell_count = sum(sell_conditions[:6])  # 기본 매도 조건
+    obv_buy = buy_conditions[10]
+    obv_sell = sell_conditions[9]
+    bb_width_buy = buy_conditions[11]
+    bb_width_sell = sell_conditions[10]
 
     w_strong_buy = params["w_strong_buy"]
     w_weak_buy = params["w_weak_buy"]
@@ -258,7 +261,7 @@ def load_data(start_date, end_date):
     data['Middle Band_TSLA'] = middle_band
     data['Lower Band_TSLA'] = lower_band
     data['BB_width_TSLA'] = (upper_band - lower_band) / middle_band
-    data['MACD_TSLA'], data['MACD_signal_TSLA'] = calculate_macd(data['Close_TSLA'])
+    data['MACD_TSLA'], data['MACD_signal_TSLA'], data['MACD_histogram_TSLA'] = calculate_macd(data['Close_TSLA'])
     data['Volume Change_TSLA'] = data['Volume_TSLA'].pct_change()
     data['ATR_TSLA'] = calculate_atr(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']], 14)
     data['Weekly RSI_TSLA'] = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14).reindex(data.index, method='ffill').fillna(50)
@@ -289,6 +292,7 @@ def simulate_portfolio(start_date, end_date, params):
         sma200 = row['SMA200_TSLA']
         macd = row['MACD_TSLA']
         macd_signal = row['MACD_signal_TSLA']
+        macd_histogram = row['MACD_histogram_TSLA']  # MACD Histogram 값 추출
         volume_change = row['Volume Change_TSLA'] if not pd.isna(row['Volume Change_TSLA']) else 0
         atr = row['ATR_TSLA']
         lower_band = row['Lower Band_TSLA']
@@ -300,8 +304,8 @@ def simulate_portfolio(start_date, end_date, params):
         bb_width = row['BB_width_TSLA']
 
         target_tsll_weight, _ = get_target_tsll_weight(
-            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr,
-            lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, params
+            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, macd_histogram,
+            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, params
         )
         target_tsla_weight = 1 - target_tsll_weight
 
