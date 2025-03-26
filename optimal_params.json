@@ -1,14 +1,17 @@
 {
-    "fg_buy": 25,
-    "fg_sell": 75,
-    "daily_rsi_buy": 30,
-    "daily_rsi_sell": 70,
-    "weekly_rsi_buy": 40,
-    "weekly_rsi_sell": 60,
-    "volume_change_strong_buy": 0.5,
-    "volume_change_weak_buy": 0.2,
-    "volume_change_sell": -0.2,
-    "w_strong_buy": 2.0,
-    "w_weak_buy": 1.0,
-    "w_sell": 1.0
+    "version": "1.0", 
+    "parameters": {
+        "fg_buy": 25,
+        "fg_sell": 75,
+        "daily_rsi_buy": 30,
+        "daily_rsi_sell": 70,
+        "weekly_rsi_buy": 40,
+        "weekly_rsi_sell": 60,
+        "volume_change_strong_buy": 0.5,
+        "volume_change_weak_buy": 0.2,
+        "volume_change_sell": -0.2,
+        "w_strong_buy": 2.0,
+        "w_weak_buy": 1.0,
+        "w_sell": 1.0
+    }
 }
