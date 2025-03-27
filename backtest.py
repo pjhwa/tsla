@@ -12,6 +12,7 @@ from multiprocessing import Pool, cpu_count
 POPULATION_SIZE = 200
 NUM_GENERATIONS = 100
 PATIENCE = 15
+TRANSACTION_COST = 0.001  # 거래 비용 0.1%
 
 # 전역 변수 초기화
 data = None
@@ -91,6 +92,11 @@ def calculate_obv(close, volume):
             obv.append(obv[-1])
     return pd.Series(obv, index=close.index).interpolate(method='linear')
 
+def calculate_vwap(df):
+    """거래량 가중 평균 가격(VWAP)을 계산합니다."""
+    vwap = (df['Close_TSLA'] * df['Volume_TSLA']).cumsum() / df['Volume_TSLA'].cumsum()
+    return vwap
+
 def init_process():
     """데이터를 초기화하고 지표를 계산합니다."""
     global data, volatility
@@ -100,19 +106,27 @@ def init_process():
 
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df)
 
-    # 지표 계산
+    # 기존 지표 계산
     data['RSI_TSLA'] = calculate_rsi(data['Close_TSLA'], 14)
     data['SMA50_TSLA'] = calculate_sma(data['Close_TSLA'], 50)
     data['SMA200_TSLA'] = calculate_sma(data['Close_TSLA'], 200)
-    upper_band, _, lower_band = calculate_bollinger_bands(data['Close_TSLA'])
+    upper_band, middle_band, lower_band = calculate_bollinger_bands(data['Close_TSLA'])
     data['Upper Band_TSLA'] = upper_band
+    data['Middle Band_TSLA'] = middle_band
     data['Lower Band_TSLA'] = lower_band
+    data['BB_width_TSLA'] = (upper_band - lower_band) / middle_band
     data['MACD_TSLA'], data['MACD_signal_TSLA'], data['MACD_histogram_TSLA'] = calculate_macd(data['Close_TSLA'])
     data['Volume Change_TSLA'] = data['Volume_TSLA'].pct_change()
-    data['ATR_TSLA'] = calculate_atr(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']], 14)
-    data['Stochastic_K_TSLA'], data['Stochastic_D_TSLA'] = calculate_stochastic(data[['High_TSLA', 'Low_TSLA', 'Close_TSLA']])
+    data['ATR_TSLA'] = calculate_atr(data, 14)
+    data['Stochastic_K_TSLA'], data['Stochastic_D_TSLA'] = calculate_stochastic(data)
     data['OBV_TSLA'] = calculate_obv(data['Close_TSLA'], data['Volume_TSLA'])
-    data['BB_width_TSLA'] = (data['Upper Band_TSLA'] - data['Lower Band_TSLA']) / data['SMA50_TSLA']
+
+    # 단기 지표 추가
+    data['SMA5_TSLA'] = calculate_sma(data['Close_TSLA'], 5)
+    data['SMA10_TSLA'] = calculate_sma(data['Close_TSLA'], 10)
+    data['RSI5_TSLA'] = calculate_rsi(data['Close_TSLA'], 5)
+    data['MACD_short_TSLA'], data['MACD_signal_short_TSLA'], data['MACD_histogram_short_TSLA'] = calculate_macd(data['Close_TSLA'], 5, 35, 5)
+    data['VWAP_TSLA'] = calculate_vwap(data)
 
     weekly_rsi = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14)
     data['Weekly RSI_TSLA'] = weekly_rsi.reindex(data.index, method='ffill').fillna(50)
@@ -137,14 +151,20 @@ def get_dynamic_param_ranges(volatility):
             (0.2, 1.0), (0.05, 0.5), (-0.5, -0.05),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
             (1.0, 3.0), (0.5, 2.0), (0.5, 2.0),  # w_strong_buy, w_weak_buy, w_sell
             (20, 40), (70, 80),  # stochastic_buy, stochastic_sell
-            (0.5, 2.0), (0.5, 2.0)  # obv_weight, bb_width_weight
+            (0.5, 2.0), (0.5, 2.0),  # obv_weight, bb_width_weight
+            (20, 40), (60, 80),  # short_rsi_buy, short_rsi_sell
+            (0.05, 0.15), (0.15, 0.3),  # bb_width_low, bb_width_high (수정됨)
+            (0.5, 2.0), (0.5, 2.0)  # w_short_buy, w_short_sell (조정됨)
         ]
     return [  # 저변동성
         (20, 40), (60, 85), (25, 40), (65, 80), (30, 40), (65, 85),
         (0.3, 1.0), (0.1, 0.5), (-0.5, -0.1),
         (1.5, 3.0), (0.5, 2.0), (0.5, 2.0),
         (20, 40), (70, 80),
-        (0.5, 2.0), (0.5, 2.0)
+        (0.5, 2.0), (0.5, 2.0),
+        (20, 40), (60, 80),
+        (0.05, 0.15), (0.15, 0.3),  # bb_width_low, bb_width_high (수정됨)
+        (0.5, 2.0), (0.5, 2.0)  # w_short_buy, w_short_sell (조정됨)
     ]
 
 def get_rsi_trend(rsi_series, window=10):
@@ -155,7 +175,7 @@ def get_rsi_trend(rsi_series, window=10):
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """포트폴리오를 목표 비중에 맞춰 조정합니다."""
+    """포트폴리오를 목표 비중에 맞춰 조정합니다 (거래 비용 반영)."""
     total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
     required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
     required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
@@ -163,26 +183,26 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
     # TSLA 조정
     if required_tsla_shares > holdings['TSLA']:
         buy_shares = required_tsla_shares - holdings['TSLA']
-        cost = buy_shares * row['Close_TSLA']
+        cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
         if cash >= cost:
             cash -= cost
             holdings['TSLA'] += buy_shares
     elif required_tsla_shares < holdings['TSLA']:
         sell_shares = holdings['TSLA'] - required_tsla_shares
-        proceeds = sell_shares * row['Close_TSLA']
+        proceeds = sell_shares * row['Close_TSLA'] * (1 - TRANSACTION_COST)
         cash += proceeds
         holdings['TSLA'] -= sell_shares
 
     # TSLL 조정
     if required_tsll_shares > holdings['TSLL']:
         buy_shares = required_tsll_shares - holdings['TSLL']
-        cost = buy_shares * row['Close_TSLL']
+        cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
         if cash >= cost:
             cash -= cost
             holdings['TSLL'] += buy_shares
     elif required_tsll_shares < holdings['TSLL']:
         sell_shares = holdings['TSLL'] - required_tsll_shares
-        proceeds = sell_shares * row['Close_TSLL']
+        proceeds = sell_shares * row['Close_TSLL'] * (1 - TRANSACTION_COST)
         cash += proceeds
         holdings['TSLL'] -= sell_shares
 
@@ -196,7 +216,7 @@ def calculate_fitness(portfolio_values):
     sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
     max_drawdown = calculate_max_drawdown(portfolio_values)
     total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
-    return sharpe_ratio * (1 + total_return) / (1 + max_drawdown)  # 개선된 피트니스 함수
+    return sharpe_ratio * (1 + total_return) / (1 + max_drawdown)
 
 def evaluate(individual, data_subset=None):
     """롤링 윈도우 백테스팅을 위한 평가 함수입니다."""
@@ -210,7 +230,10 @@ def evaluate(individual, data_subset=None):
         "volume_change_strong_buy": individual[6], "volume_change_weak_buy": individual[7],
         "volume_change_sell": individual[8], "w_strong_buy": individual[9], "w_weak_buy": individual[10],
         "w_sell": individual[11], "stochastic_buy": individual[12], "stochastic_sell": individual[13],
-        "obv_weight": individual[14], "bb_width_weight": individual[15]
+        "obv_weight": individual[14], "bb_width_weight": individual[15],
+        "short_rsi_buy": individual[16], "short_rsi_sell": individual[17],
+        "bb_width_low": individual[18], "bb_width_high": individual[19],
+        "w_short_buy": individual[20], "w_short_sell": individual[21]
     }
 
     cash = 100000  # 초기 현금
@@ -225,6 +248,8 @@ def evaluate(individual, data_subset=None):
         weekly_rsi = row['Weekly RSI_TSLA']
         daily_rsi_trend = get_rsi_trend(data_subset['RSI_TSLA'].iloc[max(0, i-10):i+1])
         close = row['Close_TSLA']
+        sma5 = row['SMA5_TSLA']
+        sma10 = row['SMA10_TSLA']
         sma50 = row['SMA50_TSLA']
         sma200 = row['SMA200_TSLA']
         macd = row['MACD_TSLA']
@@ -239,10 +264,15 @@ def evaluate(individual, data_subset=None):
         obv_prev = data_subset['OBV_TSLA'].iloc[i-1] if i > 0 else obv
         bb_width = row['BB_width_TSLA']
         macd_histogram = row['MACD_histogram_TSLA']
+        rsi5 = row['RSI5_TSLA']
+        macd_short = row['MACD_short_TSLA']
+        macd_signal_short = row['MACD_signal_short_TSLA']
+        vwap = row['VWAP_TSLA']
 
         target_tsll_weight, _ = get_target_tsll_weight(
-            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal,
-            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram, current_tsll_weight, params
+            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal,
+            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram,
+            rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params
         )
         target_tsla_weight = 1 - target_tsll_weight
 
@@ -269,7 +299,7 @@ def calculate_max_drawdown(portfolio_values):
             max_drawdown = drawdown
     return max_drawdown
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram, current_tsll_weight, params):
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram, rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params):
     """TSLL의 목표 비중을 계산합니다."""
     base_weight = current_tsll_weight
     atr_normalized = atr / close if close > 0 else 0
@@ -277,6 +307,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     volume_change_weak_buy = params["volume_change_weak_buy"] * (1 + atr_normalized)
     volume_change_sell = params["volume_change_sell"] * (1 + atr_normalized)
 
+    # 매수/매도 조건
     buy_conditions = [
         fear_greed <= params["fg_buy"],
         daily_rsi < params["daily_rsi_buy"],
@@ -287,8 +318,12 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         (daily_rsi_trend == "Increasing") and (close > sma200),
         stochastic_k < params["stochastic_buy"],
         obv > obv_prev,
-        bb_width < 0.05,
-        macd_histogram > 0
+        bb_width < params["bb_width_low"],  # 볼린저 밴드 폭 축소
+        macd_histogram > 0,
+        sma5 > sma10,  # 단기 SMA 상향 돌파
+        rsi5 < params["short_rsi_buy"],  # 단기 RSI 과매도
+        macd_short > macd_signal_short,  # 단기 MACD 매수 신호
+        close > vwap  # VWAP 위에 있을 때 매수
     ]
 
     sell_conditions = [
@@ -300,29 +335,29 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         (daily_rsi_trend == "Decreasing") and (close < sma200),
         stochastic_k > params["stochastic_sell"],
         obv < obv_prev,
-        bb_width > 0.15,
-        macd_histogram < 0
+        bb_width > params["bb_width_high"],  # 볼린저 밴드 폭 확대
+        macd_histogram < 0,
+        sma5 < sma10,  # 단기 SMA 하향 돌파
+        rsi5 > params["short_rsi_sell"],  # 단기 RSI 과매수
+        macd_short < macd_signal_short,  # 단기 MACD 매도 신호
+        close < vwap  # VWAP 아래에 있을 때 매도
     ]
 
-    strong_buy_count = buy_conditions[3]
-    weak_buy_count = buy_conditions[4] and not strong_buy_count
-    other_buy_count = sum(buy_conditions[:3] + buy_conditions[5:10])
-    sell_count = sum(sell_conditions[:6])
-    obv_buy = buy_conditions[8]
-    obv_sell = sell_conditions[7]
-    bb_width_buy = buy_conditions[9]
-    bb_width_sell = sell_conditions[8]
-    macd_hist_buy = buy_conditions[10]
-    macd_hist_sell = sell_conditions[9]
-
+    # 가중치 적용
     w_strong_buy = params["w_strong_buy"]
     w_weak_buy = params["w_weak_buy"]
     w_sell = params["w_sell"]
     obv_weight = params["obv_weight"]
     bb_width_weight = params["bb_width_weight"]
+    w_short_buy = params["w_short_buy"]
+    w_short_sell = params["w_short_sell"]
 
-    buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count + obv_weight * obv_buy + bb_width_weight * bb_width_buy + w_weak_buy * macd_hist_buy) * 0.1
-    sell_adjustment = (w_sell * sell_count + obv_weight * obv_sell + bb_width_weight * bb_width_sell + w_sell * macd_hist_sell) * 0.1
+    # 단기 지표 가중치 적용
+    short_buy_count = sum(buy_conditions[11:])  # 단기 지표 매수 조건
+    short_sell_count = sum(sell_conditions[11:])  # 단기 지표 매도 조건
+
+    buy_adjustment = (w_strong_buy * buy_conditions[3] + w_weak_buy * (buy_conditions[4] + sum(buy_conditions[:3]) + sum(buy_conditions[5:11])) + obv_weight * buy_conditions[8] + bb_width_weight * buy_conditions[9] + w_short_buy * short_buy_count) * 0.1
+    sell_adjustment = (w_sell * sum(sell_conditions[:6]) + obv_weight * sell_conditions[7] + bb_width_weight * sell_conditions[8] + w_short_sell * short_sell_count) * 0.1
     target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
     return target_weight, []
@@ -363,7 +398,9 @@ def setup_toolbox(param_ranges):
                      [toolbox.attr_0, toolbox.attr_1, toolbox.attr_2, toolbox.attr_3,
                       toolbox.attr_4, toolbox.attr_5, toolbox.attr_6, toolbox.attr_7,
                       toolbox.attr_8, toolbox.attr_9, toolbox.attr_10, toolbox.attr_11,
-                      toolbox.attr_12, toolbox.attr_13, toolbox.attr_14, toolbox.attr_15], n=1)
+                      toolbox.attr_12, toolbox.attr_13, toolbox.attr_14, toolbox.attr_15,
+                      toolbox.attr_16, toolbox.attr_17, toolbox.attr_18, toolbox.attr_19,
+                      toolbox.attr_20, toolbox.attr_21], n=1)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     toolbox.register("evaluate", cross_validation_evaluation)
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
@@ -423,7 +460,10 @@ def main():
         "volume_change_strong_buy": best_ind[6], "volume_change_weak_buy": best_ind[7],
         "volume_change_sell": best_ind[8], "w_strong_buy": best_ind[9], "w_weak_buy": best_ind[10],
         "w_sell": best_ind[11], "stochastic_buy": best_ind[12], "stochastic_sell": best_ind[13],
-        "obv_weight": best_ind[14], "bb_width_weight": best_ind[15]
+        "obv_weight": best_ind[14], "bb_width_weight": best_ind[15],
+        "short_rsi_buy": best_ind[16], "short_rsi_sell": best_ind[17],
+        "bb_width_low": best_ind[18], "bb_width_high": best_ind[19],
+        "w_short_buy": best_ind[20], "w_short_sell": best_ind[21]
     }
     print("최적 파라미터:", best_params)
     print("최대 피트니스 (Calmar Ratio 기반):", evaluate(best_ind)[0])
