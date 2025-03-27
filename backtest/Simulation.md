@@ -52,13 +52,13 @@ pip install pandas numpy scipy tabulate
 ### 사용 예시
 1. **특정 날짜부터 시뮬레이션**:
    ```bash
-   python simulation.py --start_date 2024-01-01 --days 180
+   python3 simulation.py --start_date 2024-01-01 --days 180
    ```
    - 2024년 1월 1일부터 180일 동안 시뮬레이션.
 
 2. **과거 기간 시뮬레이션**:
    ```bash
-   python simulation.py --days 180
+   python3 simulation.py --days 180
    ```
    - 현재 날짜 기준 과거 180일 시뮬레이션.
 
