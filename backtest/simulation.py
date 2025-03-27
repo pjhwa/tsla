@@ -294,7 +294,8 @@ def simulate_portfolio(start_date, end_date, params):
     cash = INITIAL_VALUE
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
-    prev_target_tsll_weight = 0.0
+    # 첫날 조정을 보장하기 위해 -1.0으로 초기화
+    prev_target_tsll_weight = -1.0
     portfolio_values = []
     dates = []
 
