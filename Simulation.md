@@ -1,23 +1,25 @@
 # Portfolio Simulation (`simulation.py`)
 
 ## Overview
+`simulation.py`는 TSLA와 TSLL 주식으로 구성된 포트폴리오의 성과를 지정된 기간 동안 시뮬레이션하는 Python 스크립트입니다. 이 스크립트는 과거 주가 데이터, 공포탐욕지수(Fear & Greed Index), 그리고 최적화된 파라미터(`optimal_params.json`)를 활용하여 포트폴리오 비중을 동적으로 조정합니다. 시뮬레이션 결과는 최종 포트폴리오 가치, 수익률, 주식 보유량, 현금 잔액 등을 포함하며, 이를 요약 테이블로 출력합니다.
 
-`simulation.py`는 지정된 기간 동안 TSLA와 TSLL 주식으로 구성된 포트폴리오를 시뮬레이션하는 Python 스크립트입니다. 이 스크립트는 과거 주가 데이터와 공포탐욕지수(Fear & Greed Index)를 활용하여 포트폴리오의 성과를 분석합니다. 시뮬레이션은 백테스트(`backtest.py`)를 통해 도출된 최적의 파라미터 값(`optimal_params.json`)을 기반으로 진행되며, 지정된 기간 동안의 수익률을 계산합니다. 결과는 최종 포트폴리오 가치, 수익률, 주식 보유량, 현금 잔액 등을 포함한 요약 테이블로 출력됩니다.
+### Key Improvements
+- **거래 비용 (Transaction Costs)**: 주식 매수 및 매도 시 0.1%의 거래 비용을 적용하여 실제 거래 조건을 반영.
+- **After Market 조정**: 전일 데이터를 기반으로 포트폴리오 비중을 결정하고, 당일 종가로 거래를 실행.
+- **향상된 파라미터 처리**: `optimal_params.json`에서 최적화된 파라미터를 로드하며, 파일이 없거나 최신 버전이 아니면 기본값을 사용.
 
 ---
 
 ## Features
-
-- **명령줄 인자 지원**: `--start_date`와 `--days`를 통해 시뮬레이션 시작 날짜와 기간을 유연하게 설정 가능.
-- **기술적 지표 계산**: RSI, SMA, MACD, Bollinger Bands, ATR, Stochastic Oscillator, OBV, BB Width 등 다양한 지표를 계산하여 포트폴리오 조정에 활용.
-- **현금 관리**: 포트폴리오 내 현금 잔액을 추적하고, 현금 비중과 금액을 결과에 포함.
-- **요약 테이블**: `tabulate` 라이브러리를 사용하여 시뮬레이션 결과를 깔끔한 테이블 형식으로 출력.
-- **파라미터 로드**: `optimal_params.json` 파일에서 최적화된 파라미터를 로드하며, 파일이 없으면 기본값 사용.
+- **명령줄 유연성**: `--start_date`와 `--days` 인자를 통해 시뮬레이션 기간을 동적으로 설정 가능.
+- **기술적 지표**: RSI, SMA (5, 10, 50, 200), MACD, Bollinger Bands, ATR, Stochastic Oscillator, OBV, BB Width, VWAP 등 다양한 지표를 계산.
+- **현금 관리**: 현금 잔액을 추적하고 거래 비용을 반영하여 현실적인 거래를 보장.
+- **포트폴리오 재조정**: 시장 지표를 기반으로 매일 TSLA와 TSLL 보유량을 목표 비중에 맞춰 조정.
+- **결과 요약**: `tabulate`를 사용하여 시뮬레이션 결과를 깔끔한 테이블로 출력(포트폴리오 가치, 수익률, 주식 비중, 현금 보유액 포함).
 
 ---
 
 ## Requirements
-
 - **Python**: 3.6 이상
 - **필요한 라이브러리**:
   - `pandas`
@@ -28,20 +30,19 @@
   - `argparse`
 
 ### Installation
-
-1. **필수 라이브러리 설치**:
+1. **의존성 설치**:
    ```bash
    pip install pandas numpy scipy tabulate
    ```
 
-2. **데이터 파일 준비**:
-   아래 파일들이 스크립트와 동일한 디렉토리에 있어야 합니다.
+2. **데이터 파일**:
+   스크립트와 동일한 디렉토리에 다음 파일이 필요합니다:
    - `fear_greed_2years.csv`: 공포탐욕지수 데이터 (컬럼: `date`, `y`)
    - `TSLA-history-2y.csv`: TSLA 주가 데이터 (컬럼: `Date`, `Close`, `High`, `Low`, `Volume` 등)
    - `TSLL-history-2y.csv`: TSLL 주가 데이터 (컬럼: `Date`, `Close`, `High`, `Low`, `Volume` 등)
-   - `optimal_params.json`: 최적화된 파라미터 파일 (선택 사항, 없으면 기본값 사용)
+   - `optimal_params.json`: 최적화된 파라미터 (선택 사항; 없으면 기본값 사용)
 
-   **참고**: 데이터 파일은 CSV 형식이며, 날짜 형식이 코드와 일치해야 합니다(`TSLA`와 `TSLL`은 `MM/DD/YYYY`, 공포탐욕지수는 `YYYY-MM-DD`). 데이터 파일이 없다면, 아래의 명령으로 수집합니다.
+   **참고**: 데이터 파일이 없는 경우 다음 명령으로 수집 가능:
    ```bash
    python3 collect_market_data.py
    ```
@@ -50,29 +51,32 @@
 
 ## Usage
 
-### Command Line Arguments
-
-- `--start_date`: 시뮬레이션 시작 날짜 (형식: `YYYY-MM-DD`). 생략 시 현재 날짜를 기준으로 과거 데이터를 사용.
-- `--days`: 시뮬레이션 기간 (일 수). 생략 시 기본값 180일 사용.
+### Command-Line Arguments
+- `--start_date`: 시뮬레이션 시작 날짜 (형식: `YYYY-MM-DD`). 생략 시 `--days`를 기준으로 과거 기간 설정.
+- `--days`: 시뮬레이션 기간(일 수). `--start_date`와 함께 사용 시 기간 길이를 정의하며, 단독 사용 시 현재 날짜부터 과거로 계산.
 
 ### Examples
-
 1. **특정 날짜부터 시뮬레이션**:
    ```bash
    python simulation.py --start_date 2024-01-01 --days 180
    ```
-   - 2024년 1월 1일부터 180일 동안 시뮬레이션 실행.
+   - 2024년 1월 1일부터 180일 동안 시뮬레이션.
 
-2. **현재 날짜 기준 과거 시뮬레이션**:
+2. **과거 기간 시뮬레이션**:
    ```bash
    python simulation.py --days 180
    ```
-   - 현재 날짜에서 180일 전부터 현재까지 시뮬레이션 실행.
+   - 현재 날짜 기준 과거 180일 시뮬레이션.
 
 ### Output
+시뮬레이션 결과는 터미널에 다음 형식으로 출력됩니다:
+- **시뮬레이션 기간**: 시작 및 종료 날짜.
+- **초기 및 최종 포트폴리오 가치**: 시뮬레이션 시작과 끝의 포트폴리오 가치.
+- **포트폴리오 수익률**: 가치 변화율(퍼센트).
+- **최신 주가**: 마지막 날의 TSLA 및 TSLL 종가.
+- **요약 테이블**: 시작과 종료 시점의 포트폴리오 지표(비중, 현금, 주식 보유량 등).
 
-시뮬레이션 결과는 다음과 같은 형식으로 터미널에 출력됩니다.
-
+#### 예시 출력
 ```
 ### Portfolio Simulation Results (180 days)
 - Simulation Period: 2024-01-01 to 2024-06-29
@@ -110,24 +114,25 @@
 
 ## Code Structure
 
-### 주요 함수
-
+### Key Functions
 1. **`load_data(start_date, end_date)`**:
-   - 지정된 기간의 주가 데이터(TSLA, TSLL)와 공포탐욕지수를 로드하고 병합.
-   - 기술적 지표(RSI, SMA50, SMA200, MACD, Bollinger Bands, ATR, 주간 RSI, Stochastic Oscillator, OBV, BB Width)를 계산하여 데이터프레임에 추가.
+   - TSLA, TSLL, 공포탐욕지수 데이터를 로드하고 지정된 기간으로 필터링.
+   - RSI, SMA(5, 10, 50, 200), MACD, Bollinger Bands, ATR, Weekly RSI, Stochastic Oscillator, OBV, VWAP, BB Width 등 기술적 지표 계산.
 
 2. **지표 계산 함수**:
    - `calculate_rsi(series, timeperiod)`: 상대강도지수(RSI) 계산.
    - `calculate_sma(series, timeperiod)`: 단순이동평균(SMA) 계산.
-   - `calculate_macd(series, fastperiod, slowperiod, signalperiod)`: MACD와 시그널 라인 계산.
+   - `calculate_macd(series, fastperiod, slowperiod, signalperiod)`: MACD, 시그널 라인, 히스토그램 계산.
    - `calculate_bollinger_bands(series, timeperiod, nbdevup, nbdevdn)`: Bollinger Bands 계산.
    - `calculate_atr(df, timeperiod)`: 평균 진폭 범위(ATR) 계산.
    - `calculate_stochastic(df, k_period, d_period)`: Stochastic Oscillator %K와 %D 계산.
    - `calculate_obv(close, volume)`: 온밸런스 볼륨(OBV) 계산.
-   - `get_rsi_trend(rsi_series, window)`: RSI의 추세(상승/하락/안정) 판단.
+   - `calculate_vwap(df)`: 거래량 가중 평균 가격(VWAP) 계산.
+   - `get_rsi_trend(rsi_series, window)`: RSI 추세(상승/하락/안정) 판단.
 
 3. **`load_params(file_path="optimal_params.json")`**:
-   - `optimal_params.json`에서 최적화된 매수/매도 파라미터를 로드. 파일이 없으면 기본값 사용.
+   - `optimal_params.json`에서 최적화된 파라미터 로드. 파일이 없거나 손상된 경우 기본값 사용.
+   - **예시**:
      ```json
      {
          "version": "2.0",
@@ -147,68 +152,55 @@
              "stochastic_buy": 20,
              "stochastic_sell": 80,
              "obv_weight": 1.0,
-             "bb_width_weight": 1.0
+             "bb_width_weight": 1.0,
+             "short_rsi_buy": 25,
+             "short_rsi_sell": 75,
+             "bb_width_low": 0.1,
+             "bb_width_high": 0.2,
+             "w_short_buy": 1.5,
+             "w_short_sell": 1.5
          }
      }
      ```
 
 4. **`get_target_tsll_weight(...)`**:
-   - 공포탐욕지수, RSI, MACD, Bollinger Bands, 거래량 변화, Stochastic Oscillator, OBV, BB Width 등 다양한 지표를 기반으로 TSLL의 목표 비중을 계산.
-   - 매수/매도 조건을 평가하여 비중을 조정.
+   - 공포탐욕지수, RSI, MACD, Bollinger Bands, 거래량 변화, Stochastic Oscillator, OBV, BB Width, 단기 지표(SMA5, SMA10, RSI5, MACD_short, VWAP)를 기반으로 TSLL 목표 비중 계산.
+   - 매수/매도 신호와 가중치(`w_strong_buy`, `w_weak_buy` 등)를 활용.
 
-5. **`simulate_portfolio(start_date, end_date, params)`**:
-   - 지정된 기간 동안 포트폴리오를 시뮬레이션.
-   - 매일 데이터를 기반으로 TSLL과 TSLA의 비중을 조정하고 현금을 관리.
-   - 최종 포트폴리오 가치, 주식 보유량, 현금 잔액 등을 반환.
+5. **`adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row)`**:
+   - 목표 비중에 맞춰 TSLA와 TSLL을 매수/매도하며 거래 비용(0.1%) 적용.
+   - 매수 시 충분한 현금이 있는 경우에만 거래 실행.
 
-6. **`main()`**:
-   - 명령줄 인자를 파싱하고, 시뮬레이션을 실행한 후 결과를 출력.
+6. **`simulate_portfolio(start_date, end_date, params)`**:
+   - 지정된 기간 동안 포트폴리오 시뮬레이션 수행.
+   - 전일 데이터로 비중 결정(After Market)하고 당일 종가로 조정.
+   - 포트폴리오 가치 추적 및 최종 결과 반환.
+
+7. **`main()`**:
+   - 명령줄 인자 파싱, 파라미터 로드, 시뮬레이션 실행, 결과 출력.
 
 ### Logic Explanation
-
 - **포트폴리오 초기화**:
-  - 초기 자산: $100,000 (현금).
-  - TSLA와 TSLL 주식 보유량: 0주.
+  - 초기 자산: $100,000(현금).
+  - TSLA 및 TSLL 주식: 0주.
 
 - **일일 조정**:
-  1. **목표 비중 계산**: `get_target_tsll_weight` 함수를 통해 TSLL의 목표 비중을 계산하고, TSLA 비중은 `1 - TSLL 비중`으로 설정.
-  2. **주식 매수/매도**:
-     - 목표 주식 수 계산: `(목표 비중 × 총 포트폴리오 가치) / 주가`.
-     - 현금이 충분하면 목표 주식 수만큼 매수/매도.
-     - 현금이 부족하면 가능한 만큼만 매수.
-  3. **TSLL 비중 100% 처리**: 목표 TSLL 비중이 100%일 경우, 남은 현금을 모두 TSLL에 투자. 단, 현금이 주식 한 주 가격보다 적으면 현금으로 유지.
+  1. **목표 비중 계산**: 전일 데이터를 사용하여 TSLL과 TSLA의 목표 비중 결정.
+  2. **포트폴리오 재조정**:
+     - 목표 주식 수 계산: `(목표 비중 × 총 포트폴리오 가치) / 당일 종가`.
+     - 매수/매도 시 0.1% 거래 비용 적용.
+     - 현금 잔액 조정.
+  3. **포트폴리오 가치 추적**: 매일 가치 기록.
 
 - **최종 계산**:
-  - 시뮬레이션 종료 후 최종 포트폴리오 가치 계산: `(TSLA 주식 수 × TSLA 종가) + (TSLL 주식 수 × TSLL 종가) + 현금`.
-  - TSLL/TSLA 비중, 현금 비중 및 금액을 계산하여 요약 테이블로 출력.
+  - 최종 가치: `(TSLA 주식 수 × TSLA 종가) + (TSLL 주식 수 × TSLL 종가) + 현금`.
+  - TSLL, TSLA, 현금 비중 계산 및 요약 테이블 출력.
 
 - **매수/매도 조건**:
-  - **매수 조건**:
-    - 공포탐욕지수 ≤ `fg_buy`
-    - 일일 RSI < `daily_rsi_buy`
-    - 주간 RSI < `weekly_rsi_buy`
-    - MACD > 시그널 (음수 구간)
-    - 거래량 변화율 > `volume_change_strong_buy` (강한 매수) 또는 > `volume_change_weak_buy` (약한 매수)
-    - le
-    - 주가 < Bollinger 하단 밴드
-    - RSI 상승 추세 & 주가 > SMA200
-    - Stochastic %K < `stochastic_buy`
-    - OBV 증가
-    - BB Width < 0.05
-  - **매도 조건**:
-    - 공포탐욕지수 ≥ `fg_sell`
-    - 일일 RSI > `daily_rsi_sell`
-    - 주간 RSI > `weekly_rsi_sell`
-    - MACD < 시그널 (양수 구간)
-    - 거래량 변화율 < `volume_change_sell`
-    - 주가 > Bollinger 상단 밴드
-    - RSI 하락 추세 & 주가 < SMA200
-    - Stochastic %K > `stochastic_sell`
-    - OBV 감소
-    - BB Width > 0.15
+  - **매수 신호**: 낮은 공포탐욕지수, 낮은 RSI, 양의 MACD 히스토그램, 증가하는 OBV, SMA5 > SMA10 등.
+  - **매도 신호**: 높은 공포탐욕지수, 높은 RSI, 음의 MACD 히스토그램, 감소하는 OBV, SMA5 < SMA10 등.
 
 ---
 
 ## Disclaimer
-
-이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 반드시 금융 전문가와 상담하시기 바랍니다.
+이 프로그램은 교육 목적으로만 제공되며, 투자 조언으로 간주되지 않습니다. 투자 결정을 내리기 전에 금융 전문가와 상담하세요.
