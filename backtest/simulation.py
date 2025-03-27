@@ -6,13 +6,25 @@ import os
 from datetime import datetime, timedelta
 import argparse
 from tabulate import tabulate
+import logging
 
 # 상수 정의
 INITIAL_VALUE = 100000  # 초기 자산 $100,000
 TRANSACTION_COST = 0.001  # 거래 비용 0.1%
 
+def setup_logging(start_date, end_date):
+    """로그 설정 및 파일명 반환"""
+    log_filename = f"simulation-{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.log"
+    logging.basicConfig(
+        filename=log_filename,
+        level=logging.INFO,
+        format='%(asctime)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    return log_filename
+
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume'):
-    """CSV 파일을 로드하고 전처리합니다."""
+    """CSV 파일을 로드하고 전처리"""
     df = pd.read_csv(file_path)
     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
     if volume_column in df.columns:
@@ -20,7 +32,7 @@ def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volum
     return df
 
 def merge_dataframes(tsla_df, tsll_df, fear_greed_df, start_date, end_date):
-    """데이터프레임을 'Date' 열을 기준으로 병합하고 지정된 기간으로 필터링합니다."""
+    """데이터프레임 병합 및 필터링"""
     data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
     data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
     data.set_index('Date', inplace=True)
@@ -29,7 +41,7 @@ def merge_dataframes(tsla_df, tsll_df, fear_greed_df, start_date, end_date):
     return data[(data.index >= start_date) & (data.index <= end_date)]
 
 def calculate_rsi(series, timeperiod=14):
-    """RSI(상대강도지수)를 계산합니다."""
+    """RSI 계산"""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
@@ -37,11 +49,11 @@ def calculate_rsi(series, timeperiod=14):
     return (100 - (100 / (1 + rs))).interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    """단순 이동평균(SMA)을 계산합니다."""
+    """SMA 계산"""
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD, 신호선, 그리고 MACD Histogram을 계산합니다."""
+    """MACD 계산"""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -50,7 +62,7 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """볼린저 밴드를 계산합니다."""
+    """볼린저 밴드 계산"""
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper_band = sma + (std * nbdevup)
@@ -58,7 +70,7 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     return upper_band.interpolate(method='linear'), sma.interpolate(method='linear'), lower_band.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
-    """평균 진폭 범위(ATR)를 계산합니다."""
+    """ATR 계산"""
     high_low = df['High_TSLA'] - df['Low_TSLA']
     high_close = np.abs(df['High_TSLA'] - df['Close_TSLA'].shift())
     low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
@@ -66,7 +78,7 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """스토캐스틱 오실레이터 %K와 %D를 계산합니다."""
+    """스토캐스틱 계산"""
     low_min = df['Low_TSLA'].rolling(window=k_period).min()
     high_max = df['High_TSLA'].rolling(window=k_period).max()
     k = 100 * ((df['Close_TSLA'] - low_min) / (high_max - low_min))
@@ -74,7 +86,7 @@ def calculate_stochastic(df, k_period=14, d_period=3):
     return k.interpolate(method='linear'), d.interpolate(method='linear')
 
 def calculate_obv(close, volume):
-    """온밸런스 볼륨(OBV)을 계산합니다."""
+    """OBV 계산"""
     obv = [0]
     for i in range(1, len(close)):
         if close.iloc[i] > close.iloc[i-1]:
@@ -86,19 +98,19 @@ def calculate_obv(close, volume):
     return pd.Series(obv, index=close.index).interpolate(method='linear')
 
 def calculate_vwap(df):
-    """거래량 가중 평균 가격(VWAP)을 계산합니다."""
+    """VWAP 계산"""
     vwap = (df['Close_TSLA'] * df['Volume_TSLA']).cumsum() / df['Volume_TSLA'].cumsum()
     return vwap
 
 def get_rsi_trend(rsi_series, window=10):
-    """RSI 추세를 분석합니다."""
+    """RSI 추세 분석"""
     if len(rsi_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def load_params(file_path="optimal_params.json"):
-    """최적 파라미터를 로드하며 버전 관리와 기본값 제공합니다."""
+    """파라미터 로드"""
     latest_version = "2.0"
     default_params = {
         "fg_buy": 25, "fg_sell": 75, "daily_rsi_buy": 30, "daily_rsi_sell": 70,
@@ -108,35 +120,23 @@ def load_params(file_path="optimal_params.json"):
         "obv_weight": 1.0, "bb_width_weight": 1.0, "short_rsi_buy": 25, "short_rsi_sell": 75,
         "bb_width_low": 0.1, "bb_width_high": 0.2, "w_short_buy": 1.5, "w_short_sell": 1.5
     }
-
     if not os.path.exists(file_path):
-        print(f"Warning: {file_path} file not found. Using default parameters.")
+        logging.warning(f"{file_path} file not found. Using default parameters.")
         return default_params
-
     try:
         with open(file_path, "r") as f:
             loaded_data = json.load(f)
-
-        if "version" in loaded_data:
-            file_version = loaded_data["version"]
-            params = loaded_data["parameters"]
-            if file_version != latest_version:
-                print(f"Warning: Version of {file_path} ({file_version}) does not match the latest version ({latest_version}). Consider updating.")
+        if "version" in loaded_data and loaded_data["version"] == latest_version:
+            return loaded_data["parameters"]
         else:
-            params = loaded_data
-            print(f"Warning: No version information in {file_path}. Consider updating to the latest format.")
-
-        for key, value in default_params.items():
-            params.setdefault(key, value)
-
-        return params
-
+            logging.warning(f"Version mismatch in {file_path}. Using default parameters.")
+            return default_params
     except (json.JSONDecodeError, KeyError) as e:
-        print(f"Warning: {file_path} is corrupted or has incorrect format. Using default parameters. Error: {e}")
+        logging.error(f"Error loading {file_path}: {e}. Using default parameters.")
         return default_params
 
 def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params):
-    """TSLL의 목표 비중을 계산합니다."""
+    """TSLL 목표 비중 계산 및 조정 사유 반환"""
     base_weight = current_tsll_weight
     atr_normalized = atr / close if close > 0 else 0
     volume_change_strong_buy = params["volume_change_strong_buy"] * (1 + atr_normalized)
@@ -144,40 +144,40 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     volume_change_sell = params["volume_change_sell"] * (1 + atr_normalized)
 
     buy_conditions = [
-        fear_greed <= params["fg_buy"],
-        daily_rsi < params["daily_rsi_buy"],
-        weekly_rsi < params["weekly_rsi_buy"],
-        (macd > macd_signal) and (macd_signal < 0),
-        macd_histogram > 0,
-        volume_change > volume_change_strong_buy,
-        volume_change > volume_change_weak_buy,
-        close < lower_band,
-        (daily_rsi_trend == "Increasing") and (close > sma200),
-        stochastic_k < params["stochastic_buy"],
-        obv > obv_prev,
-        bb_width < params["bb_width_low"],
-        sma5 > sma10,
-        rsi5 < params["short_rsi_buy"],
-        macd_short > macd_signal_short,
-        close > vwap
+        ("Fear & Greed <= fg_buy", fear_greed <= params["fg_buy"]),
+        ("Daily RSI < daily_rsi_buy", daily_rsi < params["daily_rsi_buy"]),
+        ("Weekly RSI < weekly_rsi_buy", weekly_rsi < params["weekly_rsi_buy"]),
+        ("MACD > Signal and Signal < 0", (macd > macd_signal) and (macd_signal < 0)),
+        ("MACD Histogram > 0", macd_histogram > 0),
+        ("Volume Change > Strong Buy", volume_change > volume_change_strong_buy),
+        ("Volume Change > Weak Buy", volume_change > volume_change_weak_buy),
+        ("Close < Lower Band", close < lower_band),
+        ("RSI Increasing and Close > SMA200", (daily_rsi_trend == "Increasing") and (close > sma200)),
+        ("Stochastic K < stochastic_buy", stochastic_k < params["stochastic_buy"]),
+        ("OBV > OBV_prev", obv > obv_prev),
+        ("BB Width < bb_width_low", bb_width < params["bb_width_low"]),
+        ("SMA5 > SMA10", sma5 > sma10),
+        ("RSI5 < short_rsi_buy", rsi5 < params["short_rsi_buy"]),
+        ("MACD Short > Signal Short", macd_short > macd_signal_short),
+        ("Close > VWAP", close > vwap)
     ]
 
     sell_conditions = [
-        fear_greed >= params["fg_sell"],
-        daily_rsi > params["daily_rsi_sell"],
-        weekly_rsi > params["weekly_rsi_sell"],
-        (macd < macd_signal) and (macd_signal > 0),
-        macd_histogram < 0,
-        volume_change < volume_change_sell,
-        close > upper_band,
-        (daily_rsi_trend == "Decreasing") and (close < sma200),
-        stochastic_k > params["stochastic_sell"],
-        obv < obv_prev,
-        bb_width > params["bb_width_high"],
-        sma5 < sma10,
-        rsi5 > params["short_rsi_sell"],
-        macd_short < macd_signal_short,
-        close < vwap
+        ("Fear & Greed >= fg_sell", fear_greed >= params["fg_sell"]),
+        ("Daily RSI > daily_rsi_sell", daily_rsi > params["daily_rsi_sell"]),
+        ("Weekly RSI > weekly_rsi_sell", weekly_rsi > params["weekly_rsi_sell"]),
+        ("MACD < Signal and Signal > 0", (macd < macd_signal) and (macd_signal > 0)),
+        ("MACD Histogram < 0", macd_histogram < 0),
+        ("Volume Change < Sell", volume_change < volume_change_sell),
+        ("Close > Upper Band", close > upper_band),
+        ("RSI Decreasing and Close < SMA200", (daily_rsi_trend == "Decreasing") and (close < sma200)),
+        ("Stochastic K > stochastic_sell", stochastic_k > params["stochastic_sell"]),
+        ("OBV < OBV_prev", obv < obv_prev),
+        ("BB Width > bb_width_high", bb_width > params["bb_width_high"]),
+        ("SMA5 < SMA10", sma5 < sma10),
+        ("RSI5 > short_rsi_sell", rsi5 > params["short_rsi_sell"]),
+        ("MACD Short < Signal Short", macd_short < macd_signal_short),
+        ("Close < VWAP", close < vwap)
     ]
 
     w_strong_buy = params["w_strong_buy"]
@@ -188,51 +188,70 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     w_short_buy = params["w_short_buy"]
     w_short_sell = params["w_short_sell"]
 
-    short_buy_count = sum(buy_conditions[11:])
-    short_sell_count = sum(sell_conditions[11:])
+    short_buy_count = sum(cond[1] for cond in buy_conditions[11:])
+    short_sell_count = sum(cond[1] for cond in sell_conditions[11:])
 
-    buy_adjustment = (w_strong_buy * buy_conditions[5] + w_weak_buy * (buy_conditions[6] + sum(buy_conditions[:5]) + sum(buy_conditions[7:11])) + obv_weight * buy_conditions[10] + bb_width_weight * buy_conditions[11] + w_short_buy * short_buy_count) * 0.1
-    sell_adjustment = (w_sell * sum(sell_conditions[:6]) + obv_weight * sell_conditions[9] + bb_width_weight * sell_conditions[10] + w_short_sell * short_sell_count) * 0.1
+    buy_adjustment = (w_strong_buy * buy_conditions[5][1] + w_weak_buy * (buy_conditions[6][1] + sum(cond[1] for cond in buy_conditions[:5]) + sum(cond[1] for cond in buy_conditions[7:11])) + obv_weight * buy_conditions[10][1] + bb_width_weight * buy_conditions[11][1] + w_short_buy * short_buy_count) * 0.1
+    sell_adjustment = (w_sell * sum(cond[1] for cond in sell_conditions[:6]) + obv_weight * sell_conditions[9][1] + bb_width_weight * sell_conditions[10][1] + w_short_sell * short_sell_count) * 0.1
     target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
-    return target_weight, []
+    reasons = [cond[0] for cond in buy_conditions if cond[1]] + [cond[0] for cond in sell_conditions if cond[1]]
+    return target_weight, reasons
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """포트폴리오를 목표 비중에 맞춰 조정합니다 (거래 비용 반영)."""
+    """포트폴리오 조정 및 거래 내역 반환"""
     total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
-    required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
     required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
+    required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
 
-    # TSLA 조정
+    trades = []
+
+    # 먼저 TSLL 조정: 매도하여 현금 확보
+    if required_tsll_shares < holdings['TSLL']:
+        sell_shares = holdings['TSLL'] - required_tsll_shares
+        proceeds = sell_shares * row['Close_TSLL'] * (1 - TRANSACTION_COST)
+        cash += proceeds
+        holdings['TSLL'] -= sell_shares
+        trades.append(f"Sell {sell_shares} TSLL shares at ${row['Close_TSLL']:.2f} (Proceeds: ${proceeds:.2f})")
+    elif required_tsll_shares > holdings['TSLL']:
+        buy_shares = required_tsll_shares - holdings['TSLL']
+        cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
+        if cash >= cost:
+            cash -= cost
+            holdings['TSLL'] += buy_shares
+            trades.append(f"Buy {buy_shares} TSLL shares at ${row['Close_TSLL']:.2f} (Cost: ${cost:.2f})")
+        else:
+            buy_shares = int(cash / (row['Close_TSLL'] * (1 + TRANSACTION_COST)))
+            cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
+            cash -= cost
+            holdings['TSLL'] += buy_shares
+            trades.append(f"Buy {buy_shares} TSLL shares at ${row['Close_TSLL']:.2f} (Cost: ${cost:.2f})")
+
+    # TSLA 조정: 남은 현금으로 최대한 매수
     if required_tsla_shares > holdings['TSLA']:
         buy_shares = required_tsla_shares - holdings['TSLA']
         cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
         if cash >= cost:
             cash -= cost
             holdings['TSLA'] += buy_shares
+            trades.append(f"Buy {buy_shares} TSLA shares at ${row['Close_TSLA']:.2f} (Cost: ${cost:.2f})")
+        else:
+            buy_shares = int(cash / (row['Close_TSLA'] * (1 + TRANSACTION_COST)))
+            cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
+            cash -= cost
+            holdings['TSLA'] += buy_shares
+            trades.append(f"Buy {buy_shares} TSLA shares at ${row['Close_TSLA']:.2f} (Cost: ${cost:.2f})")
     elif required_tsla_shares < holdings['TSLA']:
         sell_shares = holdings['TSLA'] - required_tsla_shares
         proceeds = sell_shares * row['Close_TSLA'] * (1 - TRANSACTION_COST)
         cash += proceeds
         holdings['TSLA'] -= sell_shares
+        trades.append(f"Sell {sell_shares} TSLA shares at ${row['Close_TSLA']:.2f} (Proceeds: ${proceeds:.2f})")
 
-    # TSLL 조정
-    if required_tsll_shares > holdings['TSLL']:
-        buy_shares = required_tsll_shares - holdings['TSLL']
-        cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
-        if cash >= cost:
-            cash -= cost
-            holdings['TSLL'] += buy_shares
-    elif required_tsll_shares < holdings['TSLL']:
-        sell_shares = holdings['TSLL'] - required_tsll_shares
-        proceeds = sell_shares * row['Close_TSLL'] * (1 - TRANSACTION_COST)
-        cash += proceeds
-        holdings['TSLL'] -= sell_shares
-
-    return holdings, cash
+    return holdings, cash, trades
 
 def load_data(start_date, end_date):
-    """지정된 기간의 데이터를 로드하고 지표를 계산합니다."""
+    """데이터 로드 및 지표 계산"""
     tsla_df = load_and_preprocess_data('TSLA-history-2y.csv')
     tsll_df = load_and_preprocess_data('TSLL-history-2y.csv')
     fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date', volume_column=None)
@@ -261,72 +280,103 @@ def load_data(start_date, end_date):
     return data
 
 def simulate_portfolio(start_date, end_date, params):
-    """지정된 기간 동안 포트폴리오 시뮬레이션을 수행합니다."""
+    """포트폴리오 시뮬레이션"""
     data = load_data(start_date, end_date)
     if data.empty:
+        logging.error("No data available for the specified period.")
         print("No data available for the specified period.")
         return None, None, None, None, None, None, None
+
+    log_filename = setup_logging(start_date, end_date)
+    logging.info(f"Simulation started: {start_date.date()} to {end_date.date()}")
+    logging.info(f"Initial Portfolio Value: ${INITIAL_VALUE:.2f}")
 
     cash = INITIAL_VALUE
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
+    prev_target_tsll_weight = 0.0
     portfolio_values = []
+    dates = []
 
-    for i in range(1, len(data)):
-        prev_row = data.iloc[i-1]  # 전날 데이터로 비중 결정
-        row = data.iloc[i]         # 당일 종가로 거래 실행
+    for i in range(len(data)):
+        row = data.iloc[i]
+        date = row.name.date()
 
-        # 전날 데이터를 기반으로 목표 비중 계산 (After Market)
-        fear_greed = prev_row['y']
-        daily_rsi = prev_row['RSI_TSLA']
-        weekly_rsi = prev_row['Weekly RSI_TSLA']
-        daily_rsi_trend = get_rsi_trend(data['RSI_TSLA'].iloc[max(0, i-10):i])
-        close = prev_row['Close_TSLA']
-        sma5 = prev_row['SMA5_TSLA']
-        sma10 = prev_row['SMA10_TSLA']
-        sma50 = prev_row['SMA50_TSLA']
-        sma200 = prev_row['SMA200_TSLA']
-        macd = prev_row['MACD_TSLA']
-        macd_signal = prev_row['MACD_signal_TSLA']
-        macd_histogram = prev_row['MACD_histogram_TSLA']
-        volume_change = prev_row['Volume Change_TSLA'] if not pd.isna(prev_row['Volume Change_TSLA']) else 0
-        atr = prev_row['ATR_TSLA']
-        lower_band = prev_row['Lower Band_TSLA']
-        upper_band = prev_row['Upper Band_TSLA']
-        stochastic_k = prev_row['Stochastic_K_TSLA']
-        stochastic_d = prev_row['Stochastic_D_TSLA']
-        obv = prev_row['OBV_TSLA']
-        obv_prev = data['OBV_TSLA'].iloc[i-2] if i > 1 else obv
-        bb_width = prev_row['BB_width_TSLA']
-        rsi5 = prev_row['RSI5_TSLA']
-        macd_short = prev_row['MACD_short_TSLA']
-        macd_signal_short = prev_row['MACD_signal_short_TSLA']
-        vwap = prev_row['VWAP_TSLA']
+        # 당일 데이터를 기반으로 목표 비중 계산 (After Market)
+        fear_greed = row['y']
+        daily_rsi = row['RSI_TSLA']
+        weekly_rsi = row['Weekly RSI_TSLA']
+        daily_rsi_trend = get_rsi_trend(data['RSI_TSLA'].iloc[max(0, i-10):i+1])
+        close = row['Close_TSLA']
+        sma5 = row['SMA5_TSLA']
+        sma10 = row['SMA10_TSLA']
+        sma50 = row['SMA50_TSLA']
+        sma200 = row['SMA200_TSLA']
+        macd = row['MACD_TSLA']
+        macd_signal = row['MACD_signal_TSLA']
+        macd_histogram = row['MACD_histogram_TSLA']
+        volume_change = row['Volume Change_TSLA'] if not pd.isna(row['Volume Change_TSLA']) else 0
+        atr = row['ATR_TSLA']
+        lower_band = row['Lower Band_TSLA']
+        upper_band = row['Upper Band_TSLA']
+        stochastic_k = row['Stochastic_K_TSLA']
+        stochastic_d = row['Stochastic_D_TSLA']
+        obv = row['OBV_TSLA']
+        obv_prev = data['OBV_TSLA'].iloc[i-1] if i > 0 else obv
+        bb_width = row['BB_width_TSLA']
+        rsi5 = row['RSI5_TSLA']
+        macd_short = row['MACD_short_TSLA']
+        macd_signal_short = row['MACD_signal_short_TSLA']
+        vwap = row['VWAP_TSLA']
 
-        target_tsll_weight, _ = get_target_tsll_weight(
+        target_tsll_weight, reasons = get_target_tsll_weight(
             fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram,
             volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params
         )
         target_tsla_weight = 1 - target_tsll_weight
 
-        # 당일 종가로 포트폴리오 조정 (After Market 반영)
-        holdings, cash = adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row)
-        total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
-        portfolio_values.append(total_value)
-        current_tsll_weight = (holdings['TSLL'] * row['Close_TSLL']) / total_value if total_value > 0 else 0
+        # 로그 기록
+        logging.info(f"--- Date: {date} ---")
+        logging.info(f"TSLA Close: ${row['Close_TSLA']:.2f}, TSLL Close: ${row['Close_TSLL']:.2f}")
+        logging.info(f"Target TSLL Weight: {target_tsll_weight*100:.2f}%, Target TSLA Weight: {target_tsla_weight*100:.2f}%")
+        if reasons:
+            logging.info(f"Adjustment Reasons: {', '.join(reasons)}")
+        else:
+            logging.info("Adjustment Reasons: None")
 
-    final_value = holdings['TSLA'] * data['Close_TSLA'].iloc[-1] + holdings['TSLL'] * data['Close_TSLL'].iloc[-1] + cash
-    final_tsll_weight = (holdings['TSLL'] * data['Close_TSLL'].iloc[-1]) / final_value if final_value > 0 else 0
+        # 비중 변경 여부 확인 후 조정
+        if abs(target_tsll_weight - prev_target_tsll_weight) > 0.01:  # 1% 이상 차이
+            holdings, cash, trades = adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row)
+            if trades:
+                logging.info("Trades Executed:")
+                for trade in trades:
+                    logging.info(f"  - {trade}")
+            else:
+                logging.info("Trades Executed: None (Insufficient cash)")
+            prev_target_tsll_weight = target_tsll_weight
+        else:
+            logging.info("No adjustment needed (Target weight unchanged)")
+
+        total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
+        current_tsll_weight = (holdings['TSLL'] * row['Close_TSLL']) / total_value if total_value > 0 else 0
+        portfolio_values.append(total_value)
+        dates.append(date)
+        logging.info(f"Portfolio Value: ${total_value:.2f}, TSLL Weight: {current_tsll_weight*100:.2f}%, TSLA Shares: {holdings['TSLA']}, TSLL Shares: {holdings['TSLL']}, Cash: ${cash:.2f}")
+
+    final_value = total_value
+    final_tsll_weight = current_tsll_weight
     final_tsla_weight = (holdings['TSLA'] * data['Close_TSLA'].iloc[-1]) / final_value if final_value > 0 else 0
     cash_weight = cash / final_value if final_value > 0 else 0
 
-    return INITIAL_VALUE, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, data['Close_TSLA'].iloc[-1], data['Close_TSLL'].iloc[-1], portfolio_values
+    logging.info(f"Simulation ended. Final Portfolio Value: ${final_value:.2f}")
+    logging.info(f"See {log_filename} for detailed logs.")
+    return INITIAL_VALUE, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, data['Close_TSLA'].iloc[-1], data['Close_TSLL'].iloc[-1], portfolio_values, dates
 
 def main():
-    """메인 함수: 명령줄 인자를 파싱하고 시뮬레이션을 실행합니다."""
+    """메인 함수"""
     parser = argparse.ArgumentParser(description="Portfolio Simulation")
-    parser.add_argument('--start_date', type=str, help="Start date for simulation (YYYY-MM-DD)")
-    parser.add_argument('--days', type=int, help="Number of days for simulation")
+    parser.add_argument('--start_date', type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument('--days', type=int, help="Number of days")
 
     args = parser.parse_args()
     params = load_params()
@@ -342,7 +392,7 @@ def main():
             print("Please specify either --start_date or --days.")
             return
 
-    initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close, portfolio_values = simulate_portfolio(start_date, end_date, params)
+    initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close, portfolio_values, dates = simulate_portfolio(start_date, end_date, params)
 
     if initial_value is None:
         return
@@ -369,6 +419,10 @@ def main():
     ]
     print("\n### Summary Table")
     print(tabulate(table, headers=["Metric", "Start", "End"], tablefmt="fancy_grid"))
+
+    print("\n### Daily Portfolio Value Trend")
+    value_table = [[dates[i], f"${portfolio_values[i]:.2f}"] for i in range(len(dates))]
+    print(tabulate(value_table, headers=["Date", "Portfolio Value"], tablefmt="simple"))
 
 if __name__ == "__main__":
     main()
