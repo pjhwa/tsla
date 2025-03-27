@@ -7,13 +7,15 @@ from scipy.stats import linregress
 from tabulate import tabulate
 import json
 import os
+import csv
 
 # Initial settings
 initial_portfolio_value = 100000  # Initial assets $100,000
+TOLERANCE = 0.05  # 5% tolerance for weight difference
 
 ### Data collection functions ###
 def get_current_vix():
-    """Fetches the current VIX value. VIX indicates market volatility."""
+    """Fetches the current VIX value."""
     try:
         vix = yf.Ticker("^VIX").history(period="1d")
         return vix['Close'].iloc[-1]
@@ -35,7 +37,7 @@ def get_fear_greed_index():
     return fg_df['Fear & Greed Index'].iloc[-1]
 
 def get_stock_data(ticker, period="max", interval="1d"):
-    """Fetches stock data and calculates technical indicators including MACD Histogram."""
+    """Fetches stock data and calculates technical indicators."""
     try:
         df = yf.Ticker(ticker).history(period=period, interval=interval)
         df.index = pd.to_datetime(df.index, errors='coerce')
@@ -44,7 +46,7 @@ def get_stock_data(ticker, period="max", interval="1d"):
         df['ATR'] = calculate_atr(df, 14)
         df['RSI'] = calculate_rsi(df['Close'], 14)
         df['MACD'], df['MACD_signal'] = calculate_macd(df['Close'], 12, 26, 9)
-        df['MACD_histogram'] = df['MACD'] - df['MACD_signal']  # MACD Histogram 계산
+        df['MACD_histogram'] = df['MACD'] - df['MACD_signal']
         df['SMA50'] = calculate_sma(df['Close'], 50)
         df['SMA200'] = calculate_sma(df['Close'], 200)
         df['Upper Band'], df['Middle Band'], df['Lower Band'] = calculate_bollinger_bands(df['Close'])
@@ -71,7 +73,6 @@ def get_weekly_rsi(ticker, period="max"):
 
 ### Indicator calculation functions ###
 def calculate_rsi(series, timeperiod=14):
-    """Calculates the Relative Strength Index (RSI)."""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
@@ -80,7 +81,6 @@ def calculate_rsi(series, timeperiod=14):
     return rsi.interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """Calculates MACD and signal line."""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -88,11 +88,9 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    """Calculates the Simple Moving Average (SMA)."""
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """Calculates Bollinger Bands."""
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper_band = sma + (std * nbdevup)
@@ -100,7 +98,6 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     return upper_band.interpolate(method='linear'), sma.interpolate(method='linear'), lower_band.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
-    """Calculates the Average True Range (ATR)."""
     high_low = df['High'] - df['Low']
     high_close = np.abs(df['High'] - df['Close'].shift())
     low_close = np.abs(df['Low'] - df['Close'].shift())
@@ -108,7 +105,6 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """Calculates the Stochastic Oscillator."""
     low_min = df['Low'].rolling(window=k_period).min()
     high_max = df['High'].rolling(window=k_period).max()
     k = 100 * ((df['Close'] - low_min) / (high_max - low_min))
@@ -116,7 +112,6 @@ def calculate_stochastic(df, k_period=14, d_period=3):
     return k.interpolate(method='linear'), d.interpolate(method='linear')
 
 def calculate_obv(df):
-    """Calculates On-Balance Volume (OBV)."""
     obv = [0]
     for i in range(1, len(df)):
         if df['Close'].iloc[i] > df['Close'].iloc[i-1]:
@@ -129,26 +124,18 @@ def calculate_obv(df):
 
 ### Trend analysis functions ###
 def get_rsi_trend(rsi_series, window=10):
-    """Analyzes the RSI trend."""
     if len(rsi_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def get_obv_trend(obv, obv_prev):
-    """Analyzes the OBV trend."""
     return "Increasing" if obv > obv_prev else "Decreasing" if obv < obv_prev else "Stable"
 
-def get_macd_trend(macd, macd_signal):
-    """Analyzes the MACD trend."""
-    return "Above Signal" if macd > macd_signal else "Below Signal" if macd < macd_signal else "On Signal"
-
 def get_stochastic_trend(stochastic_k, stochastic_d):
-    """Analyzes the Stochastic trend."""
     return "Above %D" if stochastic_k > stochastic_d else "Below %D" if stochastic_k < stochastic_d else "On %D"
 
 def get_volume_change_trend(volume_change_series, window=5):
-    """Analyzes the volume change trend."""
     if len(volume_change_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), volume_change_series[-window:])
@@ -156,7 +143,6 @@ def get_volume_change_trend(volume_change_series, window=5):
 
 ### Parameter management functions ###
 def get_dynamic_default_params(vix):
-    """Generates dynamic default parameters based on VIX."""
     if vix is None or vix <= 30:
         return {
             "fg_buy": 25, "fg_sell": 75, "daily_rsi_buy": 30, "daily_rsi_sell": 70,
@@ -183,7 +169,6 @@ def get_dynamic_default_params(vix):
         }
 
 def load_optimal_params(file_path="optimal_params.json", latest_version="2.0"):
-    """Loads optimal parameters from a JSON file."""
     try:
         with open(file_path, "r") as f:
             data = json.load(f)
@@ -196,7 +181,6 @@ def load_optimal_params(file_path="optimal_params.json", latest_version="2.0"):
 
 ### Portfolio management functions ###
 def load_transactions(file_path="transactions.txt"):
-    """Loads transaction history."""
     if not os.path.exists(file_path):
         print("transactions.txt file not found. Using initial assets.")
         return {}, 0
@@ -222,7 +206,6 @@ def load_transactions(file_path="transactions.txt"):
         return {}, 0
 
 def calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initial_investment):
-    """Calculates portfolio value and returns."""
     tsla_shares = current_holdings.get("TSLA", 0)
     tsll_shares = current_holdings.get("TSLL", 0)
     tsla_value = tsla_shares * tsla_close
@@ -233,8 +216,43 @@ def calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initia
     returns = ((total_value - initial_investment) / initial_investment * 100) if initial_investment > 0 else 0
     return total_value, tsla_value, tsll_value, tsla_weight, tsll_weight, returns
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, optimal_params):
-    """Calculates the target weight for TSLL including MACD Histogram."""
+def load_previous_recommendation(file_path="portfolio_log.csv"):
+    """Loads the most recent recommended TSLL weight and reasons from portfolio_log.csv."""
+    if not os.path.exists(file_path):
+        return None, None, None
+    try:
+        df = pd.read_csv(file_path, names=["date", "tsll_weight", "reasons"])
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        last_entry = df.iloc[-1]
+        prev_date = last_entry['date'].strftime('%Y-%m-%d')
+        tsll_weight = float(last_entry['tsll_weight'])
+        reasons_str = last_entry['reasons']
+        # Parse the reasons string into a structured list
+        reasons = []
+        current_section = None
+        for item in reasons_str.split("; "):
+            item = item.strip()
+            if item.startswith("Buy Signals"):
+                current_section = "Buy Signals (Potential increase in TSLL weight):"
+                reasons.append(current_section)
+            elif item.startswith("Sell Signals"):
+                current_section = "Sell Signals (Potential decrease in TSLL weight):"
+                reasons.append(current_section)
+            elif item.startswith("- ") and current_section:
+                reasons.append(f"  - {item[2:]}")
+        return prev_date, tsll_weight, reasons
+    except Exception as e:
+        print(f"Error loading portfolio log: {e}")
+        return None, None, None
+
+def save_recommendation(date, tsll_weight, reasons, file_path="portfolio_log.csv"):
+    """Saves the recommended TSLL weight to portfolio_log.csv."""
+    with open(file_path, "a", newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([date, tsll_weight, "; ".join(reasons)])
+
+def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, current_tsll_weight, optimal_params, data_date):
+    """Calculates the target weight for TSLL and logs it."""
     base_weight = current_tsll_weight
     atr_normalized = atr / close if close > 0 else 0
     volume_change_strong_buy = optimal_params["volume_change_strong_buy"] * (1 + atr_normalized)
@@ -246,7 +264,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         f"Daily RSI < {optimal_params['daily_rsi_buy']}": daily_rsi < optimal_params["daily_rsi_buy"],
         f"Weekly RSI < {optimal_params['weekly_rsi_buy']}": weekly_rsi < optimal_params["weekly_rsi_buy"],
         "MACD > Signal (Signal < 0)": (macd > macd_signal) and (macd_signal < 0),
-        "MACD Histogram > 0": macd_histogram > 0,  # 매수 조건에 MACD Histogram 추가
+        "MACD Histogram > 0": macd_histogram > 0,
         f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
         f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
         "Close < Lower Band": close < lower_band,
@@ -261,7 +279,7 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
         f"Daily RSI > {optimal_params['daily_rsi_sell']}": daily_rsi > optimal_params["daily_rsi_sell"],
         f"Weekly RSI > {optimal_params['weekly_rsi_sell']}": weekly_rsi > optimal_params["weekly_rsi_sell"],
         "MACD < Signal (Signal > 0)": (macd < macd_signal) and (macd_signal > 0),
-        "MACD Histogram < 0": macd_histogram < 0,  # 매도 조건에 MACD Histogram 추가
+        "MACD Histogram < 0": macd_histogram < 0,
         f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
         "Close > Upper Band": close > upper_band,
         "RSI Decreasing & Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200),
@@ -298,10 +316,12 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     if not reasons:
         reasons.append("- No significant signals detected.")
 
+    # Save the recommendation
+    save_recommendation(data_date, target_weight, reasons)
+
     return target_weight, reasons
 
 def adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close):
-    """Outputs portfolio adjustment suggestions."""
     current_tsla_shares = current_holdings.get("TSLA", 0)
     current_tsll_shares = current_holdings.get("TSLL", 0)
     target_tsla_shares = int((target_tsla_weight * total_value) / tsla_close)
@@ -310,8 +330,11 @@ def adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, t
     tsla_diff = target_tsla_shares - current_tsla_shares
     tsll_diff = target_tsll_shares - current_tsll_shares
 
-    print(f" - TSLA: {'Buy' if tsla_diff > 0 else 'Sell'} {abs(tsla_diff)} shares (target weight {target_tsla_weight*100:.2f}%)" if tsla_diff != 0 else " - TSLA: No adjustment needed")
-    print(f" - TSLL: {'Buy' if tsll_diff > 0 else 'Sell'} {abs(tsll_diff)} shares (target weight {target_tsll_weight*100:.2f}%)" if tsll_diff != 0 else " - TSLL: No adjustment needed")
+    if tsla_diff == 0 and tsll_diff == 0:
+        print(" - No adjustment needed")
+    else:
+        print(f" - TSLA: {'Buy' if tsla_diff > 0 else 'Sell'} {abs(tsla_diff)} shares (target weight {target_tsla_weight*100:.2f}%)" if tsla_diff != 0 else " - TSLA: No adjustment needed")
+        print(f" - TSLL: {'Buy' if tsll_diff > 0 else 'Sell'} {abs(tsll_diff)} shares (target weight {target_tsll_weight*100:.2f}%)" if tsll_diff != 0 else " - TSLL: No adjustment needed")
 
 ### Main execution function ###
 def analyze_and_recommend():
@@ -322,7 +345,6 @@ def analyze_and_recommend():
     tsll_df = get_stock_data("TSLL")
     weekly_rsi = get_weekly_rsi("TSLA")
 
-    # Check if data loading was successful
     if tsla_df is None or tsll_df is None or weekly_rsi is None:
         print("Data loading failed. Exiting.")
         return
@@ -336,7 +358,7 @@ def analyze_and_recommend():
     daily_rsi_trend = get_rsi_trend(tsla_df['RSI'].tail(10))
     sma50, sma200 = tsla_df['SMA50'].iloc[-1], tsla_df['SMA200'].iloc[-1]
     macd, macd_signal = tsla_df['MACD'].iloc[-1], tsla_df['MACD_signal'].iloc[-1]
-    macd_histogram = tsla_df['MACD_histogram'].iloc[-1]  # MACD Histogram 추출
+    macd_histogram = tsla_df['MACD_histogram'].iloc[-1]
     upper_band, lower_band = tsla_df['Upper Band'].iloc[-1], tsla_df['Lower Band'].iloc[-1]
     volume_change = tsla_df['Volume Change'].iloc[-1]
     atr = tsla_df['ATR'].iloc[-1]
@@ -379,30 +401,22 @@ def analyze_and_recommend():
         ["Stochastic %D", f"{stochastic_d:.2f}", "N/A"],
         ["OBV", f"{obv:.0f}", obv_trend],
         ["BB Width", f"{bb_width:.4f}", bb_width_note],
-        ["MACD Histogram", f"{macd_histogram:.2f}", "N/A"]  # 지표 테이블에 MACD Histogram 추가
+        ["MACD Histogram", f"{macd_histogram:.2f}", "N/A"]
     ]
     print(f"\n### Market Indicators (as of {data_date})")
     print(tabulate(indicators, headers=["Indicator", "Value", "Trend/Notes"], tablefmt="fancy_grid"))
 
-    # Enhanced stock prices display
-    if len(tsla_df) >= 2:
-        tsla_prev_close = tsla_df['Close'].iloc[-2]
-        tsla_change = (tsla_close - tsla_prev_close) / tsla_prev_close * 100
-        tsla_change_str = f"{tsla_change:.2f}%"
-    else:
-        tsla_change_str = "N/A"
-    if len(tsll_df) >= 2:
-        tsll_prev_close = tsll_df['Close'].iloc[-2]
-        tsll_change = (tsll_close - tsll_prev_close) / tsll_prev_close * 100
-        tsll_change_str = f"{tsll_change:.2f}%"
-    else:
-        tsll_change_str = "N/A"
+    # Stock prices display
+    tsla_prev_close = tsla_df['Close'].iloc[-2] if len(tsla_df) >= 2 else tsla_close
+    tsla_change = (tsla_close - tsla_prev_close) / tsla_prev_close * 100 if len(tsla_df) >= 2 else 0
+    tsll_prev_close = tsll_df['Close'].iloc[-2] if len(tsll_df) >= 2 else tsll_close
+    tsll_change = (tsll_close - tsll_prev_close) / tsll_prev_close * 100 if len(tsll_df) >= 2 else 0
 
     print("\n### Current Stock Prices")
-    print(f"- **TSLA Close**: ${tsla_close:.2f} (Change: {tsla_change_str})")
-    print(f"- **TSLL Close**: ${tsll_close:.2f} (Change: {tsll_change_str})")
+    print(f"- **TSLA Close**: ${tsla_close:.2f} (Change: {tsla_change:.2f}%)")
+    print(f"- **TSLL Close**: ${tsll_close:.2f} (Change: {tsll_change:.2f}%)")
 
-    # Enhanced portfolio display
+    # Portfolio display
     current_holdings, initial_investment = load_transactions()
     total_value, tsla_value, tsll_value, tsla_weight, tsll_weight, returns = calculate_portfolio_metrics(current_holdings, tsla_close, tsll_close, initial_investment)
     profit_loss = total_value - initial_investment
@@ -413,22 +427,67 @@ def analyze_and_recommend():
     print(f"- TSLA: {current_holdings.get('TSLA', 0)} shares, value: ${tsla_value:.2f} ({tsla_weight*100:.2f}%)")
     print(f"- TSLL: {current_holdings.get('TSLL', 0)} shares, value: ${tsll_value:.2f} ({tsll_weight*100:.2f}%)")
 
-    # Calculate target weights
-    target_tsll_weight, reasons = get_target_tsll_weight(
-        fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma50, sma200, macd, macd_signal, macd_histogram,
-        volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width,
-        tsll_weight, optimal_params
-    )
-    target_tsla_weight = 1 - target_tsll_weight
+    # Load previous recommendation
+    prev_date, prev_tsll_weight, prev_reasons = load_previous_recommendation()
+    prev_tsla_weight = 1 - prev_tsll_weight if prev_tsll_weight is not None else None
 
-    print("\n### Recommended Portfolio Weights")
-    print(f"- TSLA: {target_tsla_weight*100:.2f}%")
-    print(f"- TSLL: {target_tsll_weight*100:.2f}%")
-    print("\n### Portfolio Adjustment Suggestion")
-    adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close)
-    print("\n### Adjustment Reasons")
-    for reason in reasons:
-        print(reason)
+    # Compare with previous recommendation
+    if prev_date and prev_tsll_weight is not None:
+        print(f"\n### Previous Recommendation (as of {prev_date})")
+        print(f"- TSLA: {prev_tsla_weight*100:.2f}%")
+        print(f"- TSLL: {prev_tsll_weight*100:.2f}%")
+
+        tsla_weight_diff = abs(tsla_weight - prev_tsla_weight)
+        tsll_weight_diff = abs(tsll_weight - prev_tsll_weight)
+        print(f"\n### Difference from Previous Recommendation")
+        print(f"- TSLA Weight Difference: {tsla_weight_diff*100:.2f}%")
+        print(f"- TSLL Weight Difference: {tsll_weight_diff*100:.2f}%")
+
+        # Check if the previous recommendation is from today
+        if prev_date == data_date:
+            if tsla_weight_diff <= TOLERANCE and tsll_weight_diff <= TOLERANCE:
+                print("\n### Portfolio Adjustment Suggestion")
+                print(" - Portfolio is within tolerance (5%) of today's recommendation. No adjustment needed.")
+            else:
+                print("\n### Portfolio Adjustment Suggestion")
+                print(f" - Portfolio deviates from today's recommendation by more than {TOLERANCE*100}%. Adjusting to today's weights:")
+                adjust_portfolio(prev_tsla_weight, prev_tsll_weight, current_holdings, total_value, tsla_close, tsll_close)
+                print("\n### Adjustment Reasons")
+                print(f" - Reverting to previous recommendation from {prev_date}:")
+                for reason in prev_reasons:
+                    print(reason)
+        else:
+            # If previous recommendation is from a different day, provide a new recommendation
+            print("\n### New Recommendation Based on Latest Market Data")
+            target_tsll_weight, reasons = get_target_tsll_weight(
+                fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma50, sma200, macd, macd_signal, macd_histogram,
+                volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width,
+                tsll_weight, optimal_params, data_date
+            )
+            target_tsla_weight = 1 - target_tsll_weight
+            print(f"- TSLA: {target_tsla_weight*100:.2f}%")
+            print(f"- TSLL: {target_tsll_weight*100:.2f}%")
+            print("\n### Portfolio Adjustment Suggestion")
+            adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close)
+            print("\n### Adjustment Reasons")
+            for reason in reasons:
+                print(reason)
+    else:
+        # No previous recommendation exists
+        print("\n### Recommended Portfolio Weights")
+        target_tsll_weight, reasons = get_target_tsll_weight(
+            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma50, sma200, macd, macd_signal, macd_histogram,
+            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width,
+            tsll_weight, optimal_params, data_date
+        )
+        target_tsla_weight = 1 - target_tsll_weight
+        print(f"- TSLA: {target_tsla_weight*100:.2f}%")
+        print(f"- TSLL: {target_tsll_weight*100:.2f}%")
+        print("\n### Portfolio Adjustment Suggestion")
+        adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close)
+        print("\n### Adjustment Reasons")
+        for reason in reasons:
+            print(reason)
 
 if __name__ == "__main__":
     analyze_and_recommend()
