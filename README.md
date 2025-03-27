@@ -168,7 +168,7 @@ pip install yfinance pandas requests scipy tabulate numpy
   - 증가: `(w_strong_buy * 강한 매수 신호 수 + w_weak_buy * 약한 매수 신호 수 + w_weak_buy * 기타 매수 신호 수 + obv_weight * OBV 증가 + bb_width_weight * BB Width 낮음 + w_short_buy * 단기 매수 신호 수) * 0.1`
   - 감소: `(w_sell * 매도 신호 수 + obv_weight * OBV 감소 + bb_width_weight * BB Width 높음 + w_short_sell * 단기 매도 신호 수) * 0.1`
 - 목표 비중은 0%에서 100% 사이로 제한됩니다.
-- 자세한 내용은 `Adjustment_Logic.md` 파일을 참고하세요.
+- 자세한 내용은 [`Adjustment_Logic.md`](https://github.com/pjhwa/tsla/blob/main/Adjustment_Logic.md) 파일을 참고하세요.
 
 ---
 
