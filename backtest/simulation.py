@@ -285,17 +285,15 @@ def simulate_portfolio(start_date, end_date, params):
     if data.empty:
         logging.error("No data available for the specified period.")
         print("No data available for the specified period.")
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None
 
-    log_filename = setup_logging(start_date, end_date)
     logging.info(f"Simulation started: {start_date.date()} to {end_date.date()}")
     logging.info(f"Initial Portfolio Value: ${INITIAL_VALUE:.2f}")
 
     cash = INITIAL_VALUE
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
-    # 첫날 조정을 보장하기 위해 -1.0으로 초기화
-    prev_target_tsll_weight = -1.0
+    prev_target_tsll_weight = -1.0  # 첫날 조정을 보장하기 위해 -1.0으로 초기화
     portfolio_values = []
     dates = []
 
@@ -370,7 +368,7 @@ def simulate_portfolio(start_date, end_date, params):
     cash_weight = cash / final_value if final_value > 0 else 0
 
     logging.info(f"Simulation ended. Final Portfolio Value: ${final_value:.2f}")
-    logging.info(f"See {log_filename} for detailed logs.")
+    logging.info(f"See simulation-{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.log for detailed logs.")
     return INITIAL_VALUE, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, data['Close_TSLA'].iloc[-1], data['Close_TSLL'].iloc[-1], portfolio_values, dates
 
 def main():
@@ -380,7 +378,6 @@ def main():
     parser.add_argument('--days', type=int, help="Number of days")
 
     args = parser.parse_args()
-    params = load_params()
 
     if args.start_date:
         start_date = pd.to_datetime(args.start_date)
@@ -392,6 +389,10 @@ def main():
         else:
             print("Please specify either --start_date or --days.")
             return
+
+    # 로그 설정을 main 함수에서 수행
+    log_filename = setup_logging(start_date, end_date)
+    params = load_params()
 
     initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close, portfolio_values, dates = simulate_portfolio(start_date, end_date, params)
 
