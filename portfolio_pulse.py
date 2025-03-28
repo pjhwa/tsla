@@ -156,6 +156,47 @@ def get_volume_change_trend(volume_change_series, window=5):
     slope, _, _, _, _ = linregress(range(window), volume_change_series[-window:])
     return "Increasing" if slope > 0.01 else "Decreasing" if slope < -0.01 else "Stable"
 
+def get_fear_greed_note(fear_greed):
+    if fear_greed < 20:
+        return "Extreme Fear"
+    elif fear_greed < 40:
+        return "Fear"
+    elif fear_greed < 60:
+        return "Neutral"
+    elif fear_greed < 80:
+        return "Greed"
+    else:
+        return "Extreme Greed"
+
+def get_sma_note(close, sma):
+    return "Above" if close > sma else "Below"
+
+def get_bollinger_band_note(close, upper_band, lower_band):
+    if close > upper_band:
+        return "Above Upper Band"
+    elif close < lower_band:
+        return "Below Lower Band"
+    else:
+        return "Within Bands"
+
+def get_atr_note(atr, close):
+    atr_percentage = (atr / close) * 100
+    if atr_percentage > 5:
+        return "High Volatility"
+    elif atr_percentage < 2:
+        return "Low Volatility"
+    else:
+        return "Moderate Volatility"
+
+def get_macd_histogram_note(macd_histogram):
+    return "Bullish" if macd_histogram > 0 else "Bearish" if macd_histogram < 0 else "Neutral"
+
+def get_macd_trend(macd, macd_signal):
+    return "Above Signal" if macd > macd_signal else "Below Signal" if macd < macd_signal else "On Signal"
+
+def get_vwap_note(close, vwap):
+    return "Above VWAP" if close > vwap else "Below VWAP" if close < vwap else "On VWAP"
+
 ### 파라미터 관리 함수 ###
 def get_dynamic_default_params(vix):
     if vix is None or vix <= 30:
@@ -248,7 +289,6 @@ def load_previous_recommendation(file_path="portfolio_log.csv"):
         prev_date = last_entry['date'].strftime('%Y-%m-%d')
         tsll_weight = float(last_entry['tsll_weight'])
         reasons_str = last_entry['reasons']
-        # 이유를 파싱하여 들여쓰기된 리스트로 변환
         reasons = []
         current_section = None
         for item in reasons_str.split("; "):
@@ -414,45 +454,46 @@ def analyze_and_recommend():
     vwap = tsla_df['VWAP'].iloc[-1]
 
     # 트렌드 및 노트 계산
-    fear_greed_note = "Low" if fear_greed < 30 else "High" if fear_greed > 70 else "Neutral"
+    fear_greed_note = get_fear_greed_note(fear_greed)
     weekly_rsi_note = "Oversold" if weekly_rsi < 30 else "Overbought" if weekly_rsi > 70 else "Neutral"
-    close_note = []
-    if tsla_close > sma50:
-        close_note.append("Above SMA50")
-    else:
-        close_note.append("Below SMA50")
-    if tsla_close > sma200:
-        close_note.append("Above SMA200")
-    else:
-        close_note.append("Below SMA200")
-    close_note = ", ".join(close_note)
+    close_note = f"{get_sma_note(tsla_close, sma50)} SMA50, {get_sma_note(tsla_close, sma200)} SMA200"
+    sma5_note = get_sma_note(tsla_close, sma5)
+    sma10_note = get_sma_note(tsla_close, sma10)
+    sma50_note = get_sma_note(tsla_close, sma50)
+    sma200_note = get_sma_note(tsla_close, sma200)
+    bollinger_note = get_bollinger_band_note(tsla_close, upper_band, lower_band)
     volume_change_trend = get_volume_change_trend(tsla_df['Volume Change'].tail(5))
+    atr_note = get_atr_note(atr, tsla_close)
     stochastic_trend = get_stochastic_trend(stochastic_k, stochastic_d)
     obv_trend = get_obv_trend(obv, obv_prev)
     bb_width_note = "Low" if bb_width < optimal_params["bb_width_low"] else "High" if bb_width > optimal_params["bb_width_high"] else "Medium"
+    macd_histogram_note = get_macd_histogram_note(macd_histogram)
+    short_rsi_trend = get_rsi_trend(tsla_df['RSI5'].tail(10))
+    short_macd_trend = get_macd_trend(macd_short, macd_signal_short)
+    vwap_note = get_vwap_note(tsla_close, vwap)
 
-    # 지표 테이블 출력
+    # 지표 테이블 출력 (의미 있는 순서로 정렬)
     indicators = [
         ["Fear & Greed Index", f"{fear_greed:.2f}", fear_greed_note],
         ["Daily RSI", f"{daily_rsi:.2f}", daily_rsi_trend],
+        ["Short RSI (5-day)", f"{rsi5:.2f}", short_rsi_trend],
         ["Weekly RSI", f"{weekly_rsi:.2f}", weekly_rsi_note],
         ["TSLA Close", f"${tsla_close:.2f}", close_note],
-        ["SMA5", f"${sma5:.2f}", "N/A"],
-        ["SMA10", f"${sma10:.2f}", "N/A"],
-        ["SMA50", f"${sma50:.2f}", "N/A"],
-        ["SMA200", f"${sma200:.2f}", "N/A"],
-        ["Upper Bollinger Band", f"${upper_band:.2f}", "N/A"],
-        ["Lower Bollinger Band", f"${lower_band:.2f}", "N/A"],
-        ["Volume Change", f"{volume_change:.2%}", volume_change_trend],
-        ["ATR", f"${atr:.2f}", "N/A"],
-        ["Stochastic %K", f"{stochastic_k:.2f}", stochastic_trend],
-        ["Stochastic %D", f"{stochastic_d:.2f}", "N/A"],
-        ["OBV", f"{obv:.0f}", obv_trend],
+        ["SMA5", f"${sma5:.2f}", sma5_note],
+        ["SMA10", f"${sma10:.2f}", sma10_note],
+        ["SMA50", f"${sma50:.2f}", sma50_note],
+        ["SMA200", f"${sma200:.2f}", sma200_note],
+        ["MACD Histogram", f"{macd_histogram:.2f}", macd_histogram_note],
+        ["Short MACD", f"{macd_short:.2f}", short_macd_trend],
+        ["Upper Bollinger Band", f"${upper_band:.2f}", bollinger_note],
+        ["Lower Bollinger Band", f"${lower_band:.2f}", bollinger_note],
         ["BB Width", f"{bb_width:.4f}", bb_width_note],
-        ["MACD Histogram", f"{macd_histogram:.2f}", "N/A"],
-        ["Short RSI (5-day)", f"{rsi5:.2f}", "N/A"],
-        ["Short MACD", f"{macd_short:.2f}", "N/A"],
-        ["VWAP", f"${vwap:.2f}", "N/A"]
+        ["Stochastic %K", f"{stochastic_k:.2f}", stochastic_trend],
+        ["Stochastic %D", f"{stochastic_d:.2f}", get_stochastic_trend(stochastic_d, stochastic_k)],
+        ["OBV", f"{obv:.0f}", obv_trend],
+        ["Volume Change", f"{volume_change:.2%}", volume_change_trend],
+        ["ATR", f"${atr:.2f}", atr_note],
+        ["VWAP", f"${vwap:.2f}", vwap_note]
     ]
     print(f"\n### Market Indicators (as of {data_date})")
     print(tabulate(indicators, headers=["Indicator", "Value", "Trend/Notes"], tablefmt="fancy_grid"))
@@ -494,7 +535,6 @@ def analyze_and_recommend():
         print(f"- TSLA Weight Difference: {tsla_weight_diff*100:.2f}%")
         print(f"- TSLL Weight Difference: {tsll_weight_diff*100:.2f}%")
 
-        # 같은 날짜인지 확인
         if prev_date == data_date:
             if tsla_weight_diff <= TOLERANCE and tsll_weight_diff <= TOLERANCE:
                 print("\n### Portfolio Adjustment Suggestion")
@@ -508,7 +548,6 @@ def analyze_and_recommend():
                 for reason in prev_reasons:
                     print(reason)
         else:
-            # 날짜가 다르면 새로운 제안 제공
             print("\n### New Recommendation Based on Latest Market Data")
             target_tsll_weight, reasons = get_target_tsll_weight(
                 fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram,
@@ -524,7 +563,6 @@ def analyze_and_recommend():
             for reason in reasons:
                 print(reason)
     else:
-        # 이전 추천이 없는 경우
         print("\n### Recommended Portfolio Weights")
         target_tsll_weight, reasons = get_target_tsll_weight(
             fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, tsla_close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram,
