@@ -32,6 +32,12 @@ def setup_logging(start_date, end_date):
 
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume', header=0, names=None):
     """CSV 파일을 로드하고 전처리"""
+    if not os.path.exists(file_path):
+        error_message = f"Error: '{file_path}' file not found. Please run 'collect_market_data.py' to generate the required data files."
+        print(error_message)
+        logging.error(error_message)
+        raise FileNotFoundError(error_message)
+    
     df = pd.read_csv(file_path, header=header, names=names)
     df.columns = df.columns.str.strip('"')
     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
@@ -227,10 +233,15 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
 
 def load_data(start_date, end_date):
     """데이터 로드 및 지표 계산"""
-    tsla_df = load_and_preprocess_data('TSLA-history-2y.csv', date_column='Date')
-    tsll_df = load_and_preprocess_data('TSLL-history-2y.csv', date_column='Date')
-    fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date', volume_column=None)
-    vix_df = load_and_preprocess_data('VIX-history-2y.csv', date_column='Date', volume_column=None, header=3, names=['Date', 'Close'])
+    try:
+        tsla_df = load_and_preprocess_data('TSLA-history-2y.csv', date_column='Date')
+        tsll_df = load_and_preprocess_data('TSLL-history-2y.csv', date_column='Date')
+        fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date', volume_column=None)
+        vix_df = load_and_preprocess_data('VIX-history-2y.csv', date_column='Date', volume_column=None, header=3, names=['Date', 'Close'])
+    except FileNotFoundError:
+        # 오류 메시지는 load_and_preprocess_data에서 이미 출력됨
+        sys.exit(1)  # 스크립트 종료
+
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df, vix_df, start_date, end_date)
 
     data['RSI_TSLA'] = calculate_rsi(data['Close_TSLA'], 14)
@@ -367,7 +378,11 @@ def main():
     log_filename = setup_logging(start_date, end_date)
     params_file = "optimal_params.json"
 
-    initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close, portfolio_values, dates = simulate_portfolio(start_date, end_date, params_file)
+    try:
+        initial_value, final_value, holdings, final_tsll_weight, final_tsla_weight, cash, cash_weight, tsla_close, tsll_close, portfolio_values, dates = simulate_portfolio(start_date, end_date, params_file)
+    except FileNotFoundError:
+        # 오류는 load_data에서 처리됨
+        return
 
     if initial_value is None:
         return
