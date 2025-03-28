@@ -177,54 +177,54 @@ pip install yfinance pandas requests scipy tabulate numpy
 
 ### 예시 출력
 ```
-### Market Indicators (as of 2025-03-25)
+### Market Indicators (as of 2025-03-27)
 ╒══════════════════════╤═════════════╤═══════════════════════════╕
 │ Indicator            │ Value       │ Trend/Notes               │
 ╞══════════════════════╪═════════════╪═══════════════════════════╡
-│ Fear & Greed Index   │ 28.77       │ Low                       │
+│ Fear & Greed Index   │ 27.89       │ Fear                      │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Daily RSI            │ 52.42       │ Increasing                │
+│ Daily RSI            │ 52.78       │ Increasing                │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Weekly RSI           │ 27.59       │ Oversold                  │
+│ Short RSI (5-day)    │ 76.71       │ Increasing                │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ TSLA Close           │ $288.14     │ Below SMA50, Above SMA200 │
+│ Weekly RSI           │ 23.72       │ Oversold                  │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ SMA5                 │ $285.00     │ N/A                       │
+│ TSLA Close           │ $273.13     │ Below SMA50, Below SMA200 │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ SMA10                │ $290.00     │ N/A                       │
+│ SMA5                 │ $272.09     │ Above                     │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ SMA50                │ $330.86     │ N/A                       │
+│ SMA10                │ $254.58     │ Above                     │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ SMA200               │ $285.25     │ N/A                       │
+│ SMA50                │ $325.77     │ Below                     │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Upper Bollinger Band │ $305.76     │ N/A                       │
+│ SMA200               │ $286.20     │ Below                     │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Lower Bollinger Band │ $211.22     │ N/A                       │
+│ MACD Histogram       │ 8.62        │ Bullish                   │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Volume Change        │ -11.79%     │ Increasing                │
+│ Short MACD           │ -20.60      │ Above Signal              │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ ATR                  │ $18.85      │ N/A                       │
+│ Upper Bollinger Band │ $301.55     │ Within Bands              │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Stochastic %K        │ 99.92       │ Above %D                  │
+│ Lower Bollinger Band │ $212.67     │ Within Bands              │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Stochastic %D        │ 81.71       │ N/A                       │
+│ BB Width             │ 0.3457      │ High                      │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ OBV                  │ 21546747900 │ Increasing                │
+│ Stochastic %K        │ 74.99       │ Below %D                  │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ BB Width             │ 0.3657      │ High                      │
+│ Stochastic %D        │ 84.08       │ Above %D                  │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ MACD Histogram       │ 8.13        │ N/A                       │
+│ OBV                  │ 21550627591 │ Increasing                │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Short RSI (5-day)    │ 60.00       │ N/A                       │
+│ Volume Change        │ 1.71%       │ Decreasing                │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ Short MACD           │ 2.50        │ N/A                       │
+│ ATR                  │ $19.36      │ High Volatility           │
 ├──────────────────────┼─────────────┼───────────────────────────┤
-│ VWAP                 │ $290.00     │ N/A                       │
+│ VWAP                 │ $93.25      │ Above VWAP                │
 ╘══════════════════════╧═════════════╧═══════════════════════════╛
 
 ### Current Stock Prices
-- **TSLA Close**: $288.14 (Change: 3.50%)
-- **TSLL Close**: $11.85 (Change: 6.95%)
+- **TSLA Close**: $273.13 (Change: 0.39%)
+- **TSLL Close**: $10.62 (Change: 0.66%)
 
 ### Current Portfolio
 - Initial Investment: $90000.00
@@ -233,7 +233,7 @@ pip install yfinance pandas requests scipy tabulate numpy
 - TSLA: 0 shares, value: $0.00 (0.00%)
 - TSLL: 5000 shares, value: $60000.00 (100.00%)
 
-### Previous Recommendation (as of 2025-03-24)
+### Previous Recommendation (as of 2025-03-27)
 - TSLA: 10.00%
 - TSLL: 90.00%
 
@@ -251,17 +251,17 @@ pip install yfinance pandas requests scipy tabulate numpy
 
 ### Adjustment Reasons
 Buy Signals (Potential increase in TSLL weight):
-  - Weekly RSI < 40
+  - Weekly RSI < 34.78
   - MACD > Signal (Signal < 0)
   - MACD Histogram > 0
-  - RSI Increasing & Close > SMA200
   - OBV Increasing
   - SMA5 > SMA10
   - Short MACD > Signal
   - Close > VWAP
 Sell Signals (Potential decrease in TSLL weight):
-  - Stochastic %K > 80
-  - BB Width > 0.2
+  - Stochastic %K > 74.37
+  - BB Width > 0.3
+  - Short RSI > 70.26
 ```
 
 ---
