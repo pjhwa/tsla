@@ -11,6 +11,7 @@ import logging
 # 상수 정의
 INITIAL_VALUE = 100000  # 초기 자산 $100,000
 TRANSACTION_COST = 0.001  # 거래 비용 0.1%
+MAX_WEIGHT_CHANGE = 0.2  # 최대 비중 변동폭 20%
 
 def setup_logging(start_date, end_date):
     """로그 설정 및 파일명 반환"""
@@ -26,15 +27,11 @@ def setup_logging(start_date, end_date):
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume', header=0, names=None):
     """CSV 파일을 로드하고 전처리"""
     df = pd.read_csv(file_path, header=header, names=names)
-    # 열 이름에서 큰따옴표 제거
     df.columns = df.columns.str.strip('"')
-    # 날짜 열을 datetime으로 변환
     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
     if volume_column and volume_column in df.columns:
         df[volume_column] = df[volume_column].str.replace(',', '').astype(float)
-    # 데이터 타입 추론 및 변환
     df = df.infer_objects(copy=False)
-    # 숫자형으로 변환 가능한 열을 명시적으로 변환
     numeric_columns = [col for col in df.columns if col != date_column]
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors='coerce')
     df = df.interpolate(method='linear')
@@ -129,7 +126,7 @@ def get_dynamic_default_params(vix):
             "weekly_rsi_buy": 40, "weekly_rsi_sell": 60, "volume_change_strong_buy": 0.5,
             "volume_change_weak_buy": 0.2, "volume_change_sell": -0.2, "w_strong_buy": 2.0,
             "w_weak_buy": 1.0, "w_sell": 1.0, "stochastic_buy": 20, "stochastic_sell": 80,
-            "obv_weight": 1.0, "bb_width_weight": 1.0, "short_rsi_buy": 25, "short_rsi_sell": 75,
+            "obv_weight": 1.0, "bb_width_weight": 1.0, "short_rsi_buy": 30, "short_rsi_sell": 70,
             "bb_width_low": 0.1, "bb_width_high": 0.2, "w_short_buy": 1.5, "w_short_sell": 1.5
         }
     elif vix < 15:
@@ -178,42 +175,45 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     volume_change_weak_buy = params["volume_change_weak_buy"] * (1 + atr_normalized)
     volume_change_sell = params["volume_change_sell"] * (1 + atr_normalized)
 
-    buy_conditions = [
-        (f"Fear & Greed Index ≤ {params['fg_buy']}", fear_greed <= params["fg_buy"]),
-        (f"Daily RSI < {params['daily_rsi_buy']}", daily_rsi < params["daily_rsi_buy"]),
-        (f"Weekly RSI < {params['weekly_rsi_buy']}", weekly_rsi < params["weekly_rsi_buy"]),
-        ("MACD > Signal (Signal < 0)", (macd > macd_signal) and (macd_signal < 0)),
-        ("MACD Histogram > 0", macd_histogram > 0),
-        (f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)", volume_change > volume_change_strong_buy),
-        (f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)", volume_change > volume_change_weak_buy),
-        ("Close < Lower Band", close < lower_band),
-        ("RSI Increasing & Close > SMA200", (daily_rsi_trend == "Increasing") and (close > sma200)),
-        (f"Stochastic %K < {params['stochastic_buy']}", stochastic_k < params["stochastic_buy"]),
-        ("OBV Increasing", obv > obv_prev),
-        (f"BB Width < {params['bb_width_low']}", bb_width < params["bb_width_low"]),
-        ("SMA5 > SMA10", sma5 > sma10),
-        (f"Short RSI < {params['short_rsi_buy']}", rsi5 < params["short_rsi_buy"]),
-        ("Short MACD > Signal", macd_short > macd_signal_short),
-        ("Close > VWAP", close > vwap)
-    ]
+    buy_conditions = {
+        f"Fear & Greed Index ≤ {params['fg_buy']}": fear_greed <= params["fg_buy"],
+        f"Daily RSI < {params['daily_rsi_buy']}": daily_rsi < params["daily_rsi_buy"],
+        f"Weekly RSI < {params['weekly_rsi_buy']}": weekly_rsi < params["weekly_rsi_buy"],
+        "MACD > Signal (Signal < 0)": (macd > macd_signal) and (macd_signal < 0),
+        "MACD Histogram > 0": macd_histogram > 0,
+        f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
+        f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
+        "Close < Lower Band": close < lower_band,
+        "RSI Increasing & Close > SMA200": (daily_rsi_trend == "Increasing") and (close > sma200),
+        f"Stochastic %K < {params['stochastic_buy']}": stochastic_k < params["stochastic_buy"],
+        "OBV Increasing": obv > obv_prev,
+        f"BB Width < {params['bb_width_low']}": bb_width < params["bb_width_low"],
+        "SMA5 > SMA10": sma5 > sma10,
+        f"Short RSI < {params['short_rsi_buy']}": rsi5 < params["short_rsi_buy"],
+        "Short MACD > Signal": macd_short > macd_signal_short,
+        "Close > VWAP": close > vwap
+    }
 
-    sell_conditions = [
-        (f"Fear & Greed Index ≥ {params['fg_sell']}", fear_greed >= params["fg_sell"]),
-        (f"Daily RSI > {params['daily_rsi_sell']}", daily_rsi > params["daily_rsi_sell"]),
-        (f"Weekly RSI > {params['weekly_rsi_sell']}", weekly_rsi > params["weekly_rsi_sell"]),
-        ("MACD < Signal (Signal > 0)", (macd < macd_signal) and (macd_signal > 0)),
-        ("MACD Histogram < 0", macd_histogram < 0),
-        (f"Volume Change < {volume_change_sell:.2f}", volume_change < volume_change_sell),
-        ("Close > Upper Band", close > upper_band),
-        ("RSI Decreasing & Close < SMA200", (daily_rsi_trend == "Decreasing") and (close < sma200)),
-        (f"Stochastic %K > {params['stochastic_sell']}", stochastic_k < params["stochastic_sell"]),  # 논리 오류 수정
-        ("OBV Decreasing", obv < obv_prev),
-        (f"BB Width > {params['bb_width_high']}", bb_width > params["bb_width_high"]),
-        ("SMA5 < SMA10", sma5 < sma10),
-        (f"Short RSI > {params['short_rsi_sell']}", rsi5 > params["short_rsi_sell"]),
-        ("Short MACD < Signal", macd_short < macd_signal_short),
-        ("Close < VWAP", close < vwap)
-    ]
+    sell_conditions = {
+        f"Fear & Greed Index ≥ {params['fg_sell']}": fear_greed >= params["fg_sell"],
+        f"Daily RSI > {params['daily_rsi_sell']}": daily_rsi > params["daily_rsi_sell"],
+        f"Weekly RSI > {params['weekly_rsi_sell']}": weekly_rsi > params["weekly_rsi_sell"],
+        "MACD < Signal (Signal > 0)": (macd < macd_signal) and (macd_signal > 0),
+        "MACD Histogram < 0": macd_histogram < 0,
+        f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
+        "Close > Upper Band": close > upper_band,
+        "RSI Decreasing & Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200),
+        f"Stochastic %K > {params['stochastic_sell']}": stochastic_k > params["stochastic_sell"],
+        "OBV Decreasing": obv < obv_prev,
+        f"BB Width > {params['bb_width_high']}": bb_width > params["bb_width_high"],
+        "SMA5 < SMA10": sma5 < sma10,
+        f"Short RSI > {params['short_rsi_sell']}": rsi5 > params["short_rsi_sell"],
+        "Short MACD < Signal": macd_short < macd_signal_short,
+        "Close < VWAP": close < vwap
+    }
+
+    buy_reasons = [cond for cond, val in buy_conditions.items() if val]
+    sell_reasons = [cond for cond, val in sell_conditions.items() if val]
 
     w_strong_buy = params["w_strong_buy"]
     w_weak_buy = params["w_weak_buy"]
@@ -223,24 +223,64 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     w_short_buy = params["w_short_buy"]
     w_short_sell = params["w_short_sell"]
 
-    strong_buy_count = sum(1 for cond in buy_conditions if "Strong Buy" in cond[0] and cond[1])
-    weak_buy_count = sum(1 for cond in buy_conditions if "Weak Buy" in cond[0] and cond[1] and "Strong Buy" not in cond[0])
-    other_buy_count = sum(cond[1] for cond in buy_conditions[:5]) + sum(cond[1] for cond in buy_conditions[7:10])
-    sell_count = sum(cond[1] for cond in sell_conditions[:6])
-    short_buy_count = sum(cond[1] for cond in buy_conditions[12:])
-    short_sell_count = sum(cond[1] for cond in sell_conditions[11:])
+    strong_buy_count = sum(1 for r in buy_reasons if "Strong Buy" in r)
+    weak_buy_count = sum(1 for r in buy_reasons if "Weak Buy" in r and "Strong Buy" not in r)
+    other_buy_count = len(buy_reasons) - strong_buy_count - weak_buy_count
+    sell_count = len(sell_reasons)
+    short_buy_count = sum(1 for r in buy_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 > SMA10" in r or "Close > VWAP" in r)
+    short_sell_count = sum(1 for r in sell_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 < SMA10" in r or "Close < VWAP" in r)
 
     buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count +
-                      obv_weight * buy_conditions[10][1] + bb_width_weight * buy_conditions[11][1] +
+                      obv_weight * ("OBV Increasing" in buy_reasons) + bb_width_weight * (f"BB Width < {params['bb_width_low']}" in buy_reasons) +
                       w_short_buy * short_buy_count) * 0.1
-    sell_adjustment = (w_sell * sell_count + obv_weight * sell_conditions[9][1] +
-                       bb_width_weight * sell_conditions[10][1] + w_short_sell * short_sell_count) * 0.1
-    target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
+    sell_adjustment = (w_sell * sell_count + obv_weight * ("OBV Decreasing" in sell_reasons) +
+                       bb_width_weight * (f"BB Width > {params['bb_width_high']}" in sell_reasons) + w_short_sell * short_sell_count) * 0.1
 
-    reasons = [cond[0] for cond in buy_conditions if cond[1]] + [cond[0] for cond in sell_conditions if cond[1]]
-    if not reasons:
-        reasons = ["- No significant signals detected."]
-    return target_weight, reasons
+    reasons_list = []
+
+    # 과매수/과매도 조건 반영
+    if rsi5 > params["short_rsi_sell"]:
+        buy_adjustment *= 0.5
+        sell_reasons.append("Overbought RSI5 detected")
+    elif rsi5 < params["short_rsi_buy"]:
+        buy_adjustment *= 1.5
+        buy_reasons.append("Oversold RSI5 detected")
+
+    # 변동성 기반 비중 조정 (ATR 활용)
+    atr_percentage = atr / close if close > 0 else 0
+    volatility_factor = 1.0
+    if atr_percentage > 0.05:
+        volatility_factor = 0.7
+        sell_reasons.append("High volatility detected (ATR > 5%)")
+    elif atr_percentage < 0.02:
+        volatility_factor = 1.2
+        buy_reasons.append("Low volatility detected (ATR < 2%)")
+
+    # 초기 목표 비중 계산
+    preliminary_target_weight = base_weight + buy_adjustment - sell_adjustment
+    preliminary_target_weight *= volatility_factor
+
+    # 점진적 비중 조정 적용
+    weight_change = preliminary_target_weight - base_weight
+    if abs(weight_change) > MAX_WEIGHT_CHANGE:
+        target_weight = base_weight + (MAX_WEIGHT_CHANGE if weight_change > 0 else -MAX_WEIGHT_CHANGE)
+        reasons_list.append(f"Weight change limited to {MAX_WEIGHT_CHANGE*100:.0f}% per day")
+    else:
+        target_weight = preliminary_target_weight
+
+    target_weight = max(0.0, min(target_weight, 1.0))
+
+    # 이유 리스트 작성
+    if buy_reasons:
+        reasons_list.append("Buy Signals (Potential increase in TSLL weight):")
+        reasons_list.extend(f"  - {r}" for r in buy_reasons)
+    if sell_reasons:
+        reasons_list.append("Sell Signals (Potential decrease in TSLL weight):")
+        reasons_list.extend(f"  - {r}" for r in sell_reasons)
+    if not buy_reasons and not sell_reasons:
+        reasons_list.append("- No significant signals detected.")
+
+    return target_weight, reasons_list
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
     """포트폴리오 조정 및 거래 내역 반환"""
@@ -347,7 +387,6 @@ def simulate_portfolio(start_date, end_date, params_file="optimal_params.json"):
         date = row.name.date()
         vix = row['Close']  # VIX 종가
 
-        # VIX 기반 동적 파라미터 로드
         params = load_params(params_file, vix)
 
         fear_greed = row['y']
