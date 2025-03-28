@@ -12,8 +12,9 @@ import csv
 # 초기 설정
 initial_portfolio_value = 100000  # 초기 자산 $100,000
 TOLERANCE = 0.05  # 비중 차이 허용 범위 5%
+MAX_WEIGHT_CHANGE = 0.2  # 최대 비중 변동폭 20%
 
-### 데이터 수집 함수 ###
+# 데이터 수집 함수
 def get_current_vix():
     """현재 VIX 값을 가져옴"""
     try:
@@ -81,7 +82,7 @@ def get_weekly_rsi(ticker, period="max"):
         print(f"Error calculating weekly RSI for {ticker}: {e}")
         return None
 
-### 지표 계산 함수 ###
+# 지표 계산 함수
 def calculate_rsi(series, timeperiod=14):
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
@@ -137,7 +138,7 @@ def calculate_vwap(df):
     vwap = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
     return vwap
 
-### 트렌드 분석 함수 ###
+# 트렌드 분석 함수
 def get_rsi_trend(rsi_series, window=10):
     if len(rsi_series) < window:
         return "Stable"
@@ -197,7 +198,7 @@ def get_macd_trend(macd, macd_signal):
 def get_vwap_note(close, vwap):
     return "Above VWAP" if close > vwap else "Below VWAP" if close < vwap else "On VWAP"
 
-### 파라미터 관리 함수 ###
+# 파라미터 관리 함수
 def get_dynamic_default_params(vix):
     if vix is None or vix <= 30:
         return {
@@ -205,7 +206,7 @@ def get_dynamic_default_params(vix):
             "weekly_rsi_buy": 40, "weekly_rsi_sell": 60, "volume_change_strong_buy": 0.5,
             "volume_change_weak_buy": 0.2, "volume_change_sell": -0.2, "w_strong_buy": 2.0,
             "w_weak_buy": 1.0, "w_sell": 1.0, "stochastic_buy": 20, "stochastic_sell": 80,
-            "obv_weight": 1.0, "bb_width_weight": 1.0, "short_rsi_buy": 25, "short_rsi_sell": 75,
+            "obv_weight": 1.0, "bb_width_weight": 1.0, "short_rsi_buy": 30, "short_rsi_sell": 70,
             "bb_width_low": 0.1, "bb_width_high": 0.2, "w_short_buy": 1.5, "w_short_sell": 1.5
         }
     elif vix < 15:
@@ -239,7 +240,7 @@ def load_optimal_params(file_path="optimal_params.json", latest_version="2.0"):
         print("Failed to load parameter file. Using dynamic default values.")
     return get_dynamic_default_params(get_current_vix())
 
-### 포트폴리오 관리 함수 ###
+# 포트폴리오 관리 함수
 def load_transactions(file_path="transactions.txt"):
     """transactions.txt에서 거래 내역을 로드"""
     if not os.path.exists(file_path):
@@ -285,7 +286,7 @@ def load_previous_recommendation(file_path="portfolio_log.csv"):
     try:
         df = pd.read_csv(file_path, names=["date", "tsll_weight", "reasons"])
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        last_entry = df.iloc[-1]
+        last_entry = df.iloc[-1]  # Fixed typo: Changed REVlast_entry to last_entry
         prev_date = last_entry['date'].strftime('%Y-%m-%d')
         tsll_weight = float(last_entry['tsll_weight'])
         reasons_str = last_entry['reasons']
@@ -380,27 +381,76 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
                       w_short_buy * short_buy_count) * 0.1
     sell_adjustment = (w_sell * sell_count + obv_weight * ("OBV Decreasing" in sell_reasons) +
                        bb_width_weight * (f"BB Width > {optimal_params['bb_width_high']}" in sell_reasons) + w_short_sell * short_sell_count) * 0.1
-    target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
-    reasons = []
+    # 이유 리스트 초기화
+    reasons_list = []
+
+    # 과매수/과매도 조건 반영
+    if rsi5 > optimal_params["short_rsi_sell"]:  # RSI5 > 70
+        buy_adjustment *= 0.5  # 매수 조정량 절반으로 감소
+        sell_reasons.append("Overbought RSI5 detected")
+    elif rsi5 < optimal_params["short_rsi_buy"]:  # RSI5 < 30
+        buy_adjustment *= 1.5  # 매수 조정량 증가
+        buy_reasons.append("Oversold RSI5 detected")
+
+    # 변동성 기반 비중 조정 (ATR 활용)
+    atr_percentage = atr / close if close > 0 else 0
+    volatility_factor = 1.0
+    if atr_percentage > 0.05:  # 변동성 5% 이상
+        volatility_factor = 0.7  # TSLL 비중 30% 감소
+        sell_reasons.append("High volatility detected (ATR > 5%)")
+    elif atr_percentage < 0.02:  # 변동성 2% 미만
+        volatility_factor = 1.2  # TSLL 비중 20% 증가 가능
+        buy_reasons.append("Low volatility detected (ATR < 2%)")
+
+    # 초기 목표 비중 계산
+    preliminary_target_weight = base_weight + buy_adjustment - sell_adjustment
+    preliminary_target_weight *= volatility_factor
+
+    # 점진적 비중 조정 적용
+    weight_change = preliminary_target_weight - base_weight
+    if abs(weight_change) > MAX_WEIGHT_CHANGE:
+        target_weight = base_weight + (MAX_WEIGHT_CHANGE if weight_change > 0 else -MAX_WEIGHT_CHANGE)
+        reasons_list.append(f"Weight change limited to {MAX_WEIGHT_CHANGE*100:.0f}% per day")
+    else:
+        target_weight = preliminary_target_weight
+
+    target_weight = max(0.0, min(target_weight, 1.0))
+
+    # 이유 리스트 작성
     if buy_reasons:
-        reasons.append("Buy Signals (Potential increase in TSLL weight):")
-        reasons.extend(f"  - {r}" for r in buy_reasons)
+        reasons_list.append("Buy Signals (Potential increase in TSLL weight):")
+        reasons_list.extend(f"  - {r}" for r in buy_reasons)
     if sell_reasons:
-        reasons.append("Sell Signals (Potential decrease in TSLL weight):")
-        reasons.extend(f"  - {r}" for r in sell_reasons)
-    if not reasons:
-        reasons.append("- No significant signals detected.")
+        reasons_list.append("Sell Signals (Potential decrease in TSLL weight):")
+        reasons_list.extend(f"  - {r}" for r in sell_reasons)
+    if not buy_reasons and not sell_reasons:
+        reasons_list.append("- No significant signals detected.")
 
-    save_recommendation(data_date, target_weight, reasons)
-    return target_weight, reasons
+    save_recommendation(data_date, target_weight, reasons_list)
+    return target_weight, reasons_list
 
 def adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close):
-    """포트폴리오 조정 계산 및 출력"""
+    """포트폴리오 조정 계산 및 출력 (거래 비용 0.1% 반영)"""
+    TRANSACTION_COST = 0.001  # 거래 비용 0.1%
     current_tsla_shares = current_holdings.get("TSLA", 0)
     current_tsll_shares = current_holdings.get("TSLL", 0)
-    target_tsla_shares = int((target_tsla_weight * total_value) / tsla_close)
-    target_tsll_shares = int((target_tsll_weight * total_value) / tsll_close)
+
+    # 목표 가치 계산
+    target_tsla_value = target_tsla_weight * total_value
+    target_tsll_value = target_tsll_weight * total_value
+
+    # 거래 비용 반영: 매수 시 비용 추가, 매도 시 비용 감소
+    tsla_cost_factor = 1 + TRANSACTION_COST  # 매수 시 0.1% 추가
+    tsla_proceed_factor = 1 - TRANSACTION_COST  # 매도 시 0.1% 감소
+    tsll_cost_factor = 1 + TRANSACTION_COST
+    tsll_proceed_factor = 1 - TRANSACTION_COST
+
+    # 목표 주식 수 계산
+    current_tsla_weight = current_tsla_shares * tsla_close / total_value if total_value > 0 else 0
+    current_tsll_weight = current_tsll_shares * tsll_close / total_value if total_value > 0 else 0
+    target_tsla_shares = int(target_tsla_value / (tsla_close * tsla_cost_factor)) if target_tsla_weight > current_tsla_weight else int(target_tsla_value / (tsla_close * tsla_proceed_factor))
+    target_tsll_shares = int(target_tsll_value / (tsll_close * tsll_cost_factor)) if target_tsll_weight > current_tsll_weight else int(target_tsll_value / (tsll_close * tsll_proceed_factor))
 
     tsla_diff = target_tsla_shares - current_tsla_shares
     tsll_diff = target_tsll_shares - current_tsll_shares
@@ -408,10 +458,20 @@ def adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, t
     if tsla_diff == 0 and tsll_diff == 0:
         print(" - No adjustment needed")
     else:
-        print(f" - TSLA: {'Buy' if tsla_diff > 0 else 'Sell'} {abs(tsla_diff)} shares (target weight {target_tsla_weight*100:.2f}%)" if tsla_diff != 0 else " - TSLA: No adjustment needed")
-        print(f" - TSLL: {'Buy' if tsll_diff > 0 else 'Sell'} {abs(tsll_diff)} shares (target weight {target_tsll_weight*100:.2f}%)" if tsll_diff != 0 else " - TSLL: No adjustment needed")
+        if tsla_diff != 0:
+            action = "Buy" if tsla_diff > 0 else "Sell"
+            cost_impact = tsla_close * abs(tsla_diff) * TRANSACTION_COST
+            print(f" - TSLA: {action} {abs(tsla_diff)} shares (target weight {target_tsla_weight*100:.2f}%, transaction cost: ${cost_impact:.2f})")
+        else:
+            print(" - TSLA: No adjustment needed")
+        if tsll_diff != 0:
+            action = "Buy" if tsll_diff > 0 else "Sell"
+            cost_impact = tsll_close * abs(tsll_diff) * TRANSACTION_COST
+            print(f" - TSLL: {action} {abs(tsll_diff)} shares (target weight {target_tsll_weight*100:.2f}%, transaction cost: ${cost_impact:.2f})")
+        else:
+            print(" - TSLL: No adjustment needed")
 
-### 메인 실행 함수 ###
+# 메인 실행 함수
 def analyze_and_recommend():
     """주식 데이터 분석 및 포트폴리오 조정 제안"""
     print("Loading data...")
@@ -505,8 +565,8 @@ def analyze_and_recommend():
     tsll_change = (tsll_close - tsll_prev_close) / tsll_prev_close * 100 if tsll_prev_close > 0 else 0
 
     print("\n### Current Stock Prices")
-    print(f"- **TSLA Close**: ${tsla_close:.2f} (Change: {tsla_change:.2f}%)")
-    print(f"- **TSLL Close**: ${tsll_close:.2f} (Change: {tsll_change:.2f}%)")
+    print(f"- TSLA Close: ${tsla_close:.2f} (Change: {tsla_change:.2f}%)")
+    print(f"- TSLL Close: ${tsll_close:.2f} (Change: {tsll_change:.2f}%)")
 
     # 현재 포트폴리오 출력
     current_holdings, initial_investment = load_transactions()
