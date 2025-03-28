@@ -9,32 +9,42 @@ from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 import sys
 from sklearn.model_selection import TimeSeriesSplit
+import logging
 
-# 부모 디렉토리 추가
+# Add parent directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from weight_adjustment import get_target_tsll_weight
 
-# 상수 정의
+# Constants
 POPULATION_SIZE = 200
 NUM_GENERATIONS = 100
 PATIENCE = 15
-TRANSACTION_COST = 0.002  # 거래 비용 0.2% (슬리피지 포함)
+TRANSACTION_COST = 0.002  # 0.2% transaction cost (including slippage)
 
-# 전역 변수
+# Global variables
 data = None
 volatility = None
 
-def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume'):
-    """CSV 파일 로드 및 전처리"""
-    df = pd.read_csv(file_path)
+# Logging setup
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume', header=0, names=None):
+    """Load and preprocess CSV file."""
+    if not os.path.exists(file_path):
+        error_message = f"Error: '{file_path}' file not found. Please run 'collect_market_data.py' to generate the required data files."
+        print(error_message)
+        logging.error(error_message)
+        raise FileNotFoundError(error_message)
+    
+    df = pd.read_csv(file_path, header=header, names=names)
     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
-    if volume_column in df.columns:
+    if volume_column and volume_column in df.columns:
         df[volume_column] = df[volume_column].str.replace(',', '').astype(float)
     return df
 
 def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
-    """데이터프레임 병합"""
+    """Merge dataframes."""
     data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
     data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
     data.set_index('Date', inplace=True)
@@ -43,7 +53,7 @@ def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
     return data
 
 def calculate_rsi(series, timeperiod=14):
-    """RSI 계산"""
+    """Calculate RSI."""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
@@ -51,11 +61,11 @@ def calculate_rsi(series, timeperiod=14):
     return (100 - (100 / (1 + rs))).interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    """SMA 계산"""
+    """Calculate SMA."""
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD 계산"""
+    """Calculate MACD."""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -64,7 +74,7 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """볼린저 밴드 계산"""
+    """Calculate Bollinger Bands."""
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper = sma + (std * nbdevup)
@@ -72,7 +82,7 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     return upper.interpolate(method='linear'), sma.interpolate(method='linear'), lower.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
-    """ATR 계산"""
+    """Calculate ATR."""
     high_low = df['High_TSLA'] - df['Low_TSLA']
     high_close = np.abs(df['High_TSLA'] - df['Close_TSLA'].shift())
     low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
@@ -80,7 +90,7 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """스토캐스틱 계산"""
+    """Calculate Stochastic Oscillator."""
     low_min = df['Low_TSLA'].rolling(window=k_period).min()
     high_max = df['High_TSLA'].rolling(window=k_period).max()
     k = 100 * ((df['Close_TSLA'] - low_min) / (high_max - low_min))
@@ -88,7 +98,7 @@ def calculate_stochastic(df, k_period=14, d_period=3):
     return k.interpolate(method='linear'), d.interpolate(method='linear')
 
 def calculate_obv(close, volume):
-    """OBV 계산"""
+    """Calculate OBV."""
     obv = [0]
     for i in range(1, len(close)):
         if close.iloc[i] > close.iloc[i-1]:
@@ -100,16 +110,20 @@ def calculate_obv(close, volume):
     return pd.Series(obv, index=close.index).interpolate(method='linear')
 
 def calculate_vwap(df):
-    """VWAP 계산"""
+    """Calculate VWAP."""
     vwap = (df['Close_TSLA'] * df['Volume_TSLA']).cumsum() / df['Volume_TSLA'].cumsum()
     return vwap
 
 def init_process():
-    """데이터 초기화 및 지표 계산"""
+    """Initialize data and calculate indicators."""
     global data, volatility
-    fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date')
-    tsla_df = load_and_preprocess_data('TSLA-history-2y.csv')
-    tsll_df = load_and_preprocess_data('TSLL-history-2y.csv')
+    try:
+        fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date')
+        tsla_df = load_and_preprocess_data('TSLA-history-2y.csv')
+        tsll_df = load_and_preprocess_data('TSLL-history-2y.csv')
+        vix_df = load_and_preprocess_data('VIX-history-2y.csv', date_column='Date', volume_column=None, header=3, names=['Date', 'Close'])
+    except FileNotFoundError:
+        sys.exit(1)  # Exit script if file not found
 
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df)
 
@@ -137,9 +151,16 @@ def init_process():
     volatility = get_volatility_for_backtest(data)
 
 def get_volatility_for_backtest(data):
-    """VIX 평균 변동성 계산"""
-    vix_df = pd.read_csv('VIX-history-2y.csv', skiprows=3, header=None, names=['Date', 'VIX'],
-                         parse_dates=['Date'], index_col='Date')
+    """Calculate average VIX volatility."""
+    try:
+        vix_df = pd.read_csv('VIX-history-2y.csv', skiprows=3, header=None, names=['Date', 'VIX'],
+                             parse_dates=['Date'], index_col='Date')
+    except FileNotFoundError:
+        error_message = "Error: 'VIX-history-2y.csv' file not found. Please run 'collect_market_data.py' to generate the required data files."
+        print(error_message)
+        logging.error(error_message)
+        sys.exit(1)
+    
     start_date = data.index.min()
     end_date = data.index.max()
     vix_filtered = vix_df.loc[start_date:end_date]
@@ -147,8 +168,8 @@ def get_volatility_for_backtest(data):
     return vix_filtered['VIX'].mean()
 
 def get_dynamic_param_ranges(volatility):
-    """변동성 기반 파라미터 범위 설정"""
-    if volatility > 30:  # 고변동성
+    """Set parameter ranges based on volatility."""
+    if volatility > 30:  # High volatility
         return [
             (10, 40), (60, 90), (20, 40), (60, 80), (20, 40), (60, 80),
             (0.3, 1.5), (0.1, 0.7), (-0.7, -0.1),
@@ -159,7 +180,7 @@ def get_dynamic_param_ranges(volatility):
             (0.05, 0.2), (0.2, 0.4),
             (0.5, 2.5), (0.5, 2.5)
         ]
-    return [  # 저변동성
+    return [  # Low volatility
         (20, 50), (50, 80), (25, 45), (55, 75), (30, 50), (50, 70),
         (0.2, 1.0), (0.05, 0.5), (-0.5, -0.05),
         (1.0, 3.0), (0.5, 2.0), (0.5, 2.0),
@@ -171,14 +192,14 @@ def get_dynamic_param_ranges(volatility):
     ]
 
 def get_rsi_trend(rsi_series, window=10):
-    """RSI 추세 분석"""
+    """Analyze RSI trend."""
     if len(rsi_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """포트폴리오 조정"""
+    """Adjust portfolio."""
     total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
     required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
     required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
@@ -210,7 +231,7 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
     return holdings, cash
 
 def calculate_fitness(portfolio_values):
-    """피트니스 스코어 계산 (Sharpe + Calmar Ratio)"""
+    """Calculate fitness score (Sharpe + Calmar Ratio)."""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
@@ -221,7 +242,7 @@ def calculate_fitness(portfolio_values):
     return (sharpe_ratio + calmar_ratio) / 2
 
 def evaluate(individual, data_subset=None):
-    """백테스트 평가 함수"""
+    """Evaluate backtest."""
     global data
     if data_subset is None:
         data_subset = data
@@ -292,7 +313,7 @@ def evaluate(individual, data_subset=None):
     return fitness,
 
 def calculate_max_drawdown(portfolio_values):
-    """최대 손실 계산"""
+    """Calculate maximum drawdown."""
     peak = portfolio_values[0]
     max_drawdown = 0
     for value in portfolio_values:
@@ -309,14 +330,14 @@ creator.create("Individual", list, fitness=creator.FitnessMax)
 toolbox = base.Toolbox()
 
 def clip_individual(ind, param_ranges):
-    """파라미터 범위 클리핑"""
+    """Clip parameters to their ranges."""
     for i in range(len(ind)):
         low, high = param_ranges[i]
         ind[i] = max(low, min(ind[i], high))
     return ind
 
 def cross_validation_evaluation(individual, folds=5):
-    """Time Series Split 교차 검증"""
+    """Perform Time Series Split cross-validation."""
     global data
     tscv = TimeSeriesSplit(n_splits=folds)
     fitness_scores = []
@@ -329,7 +350,7 @@ def cross_validation_evaluation(individual, folds=5):
     return np.mean(fitness_scores),
 
 def setup_toolbox(param_ranges):
-    """DEAP 툴박스 설정"""
+    """Set up DEAP toolbox."""
     for i, (low, high) in enumerate(param_ranges):
         toolbox.register(f"attr_{i}", random.uniform, low, high)
 
@@ -347,15 +368,19 @@ def setup_toolbox(param_ranges):
     toolbox.register("select", tools.selTournament, tournsize=3)
 
 def save_best_params(best_params):
-    """최적 파라미터 저장"""
+    """Save optimal parameters."""
     data_to_save = {"version": "2.1", "parameters": best_params}
     with open("optimal_params.json", "w") as f:
         json.dump(data_to_save, f)
 
 def main():
-    """유전 알고리즘 실행"""
+    """Run genetic algorithm."""
     global volatility
-    init_process()
+    try:
+        init_process()
+    except FileNotFoundError:
+        return  # Exit gracefully if file not found
+
     param_ranges = get_dynamic_param_ranges(volatility)
     setup_toolbox(param_ranges)
 
