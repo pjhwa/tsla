@@ -7,19 +7,26 @@ import json
 import os
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
+import sys
+from sklearn.model_selection import TimeSeriesSplit
+
+# 부모 디렉토리 추가
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from weight_adjustment import get_target_tsll_weight
 
 # 상수 정의
 POPULATION_SIZE = 200
 NUM_GENERATIONS = 100
 PATIENCE = 15
-TRANSACTION_COST = 0.001  # 거래 비용 0.1%
+TRANSACTION_COST = 0.002  # 거래 비용 0.2% (슬리피지 포함)
 
-# 전역 변수 초기화
+# 전역 변수
 data = None
 volatility = None
 
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume'):
-    """CSV 파일을 로드하고 전처리합니다."""
+    """CSV 파일 로드 및 전처리"""
     df = pd.read_csv(file_path)
     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
     if volume_column in df.columns:
@@ -27,7 +34,7 @@ def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volum
     return df
 
 def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
-    """데이터프레임을 'Date' 열을 기준으로 병합합니다."""
+    """데이터프레임 병합"""
     data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
     data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
     data.set_index('Date', inplace=True)
@@ -36,7 +43,7 @@ def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
     return data
 
 def calculate_rsi(series, timeperiod=14):
-    """RSI(상대강도지수)를 계산합니다."""
+    """RSI 계산"""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
@@ -44,11 +51,11 @@ def calculate_rsi(series, timeperiod=14):
     return (100 - (100 / (1 + rs))).interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    """단순 이동평균(SMA)을 계산합니다."""
+    """SMA 계산"""
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """MACD, 신호선, 그리고 MACD Histogram을 계산합니다."""
+    """MACD 계산"""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -57,7 +64,7 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """볼린저 밴드를 계산합니다."""
+    """볼린저 밴드 계산"""
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper = sma + (std * nbdevup)
@@ -65,7 +72,7 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     return upper.interpolate(method='linear'), sma.interpolate(method='linear'), lower.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
-    """평균 진폭 범위(ATR)를 계산합니다."""
+    """ATR 계산"""
     high_low = df['High_TSLA'] - df['Low_TSLA']
     high_close = np.abs(df['High_TSLA'] - df['Close_TSLA'].shift())
     low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
@@ -73,7 +80,7 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """스토캐스틱 오실레이터 %K와 %D를 계산합니다."""
+    """스토캐스틱 계산"""
     low_min = df['Low_TSLA'].rolling(window=k_period).min()
     high_max = df['High_TSLA'].rolling(window=k_period).max()
     k = 100 * ((df['Close_TSLA'] - low_min) / (high_max - low_min))
@@ -81,7 +88,7 @@ def calculate_stochastic(df, k_period=14, d_period=3):
     return k.interpolate(method='linear'), d.interpolate(method='linear')
 
 def calculate_obv(close, volume):
-    """온밸런스 볼륨(OBV)을 계산합니다."""
+    """OBV 계산"""
     obv = [0]
     for i in range(1, len(close)):
         if close.iloc[i] > close.iloc[i-1]:
@@ -93,12 +100,12 @@ def calculate_obv(close, volume):
     return pd.Series(obv, index=close.index).interpolate(method='linear')
 
 def calculate_vwap(df):
-    """거래량 가중 평균 가격(VWAP)을 계산합니다."""
+    """VWAP 계산"""
     vwap = (df['Close_TSLA'] * df['Volume_TSLA']).cumsum() / df['Volume_TSLA'].cumsum()
     return vwap
 
 def init_process():
-    """데이터를 초기화하고 지표를 계산합니다."""
+    """데이터 초기화 및 지표 계산"""
     global data, volatility
     fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date')
     tsla_df = load_and_preprocess_data('TSLA-history-2y.csv')
@@ -106,7 +113,6 @@ def init_process():
 
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df)
 
-    # 기존 지표 계산
     data['RSI_TSLA'] = calculate_rsi(data['Close_TSLA'], 14)
     data['SMA50_TSLA'] = calculate_sma(data['Close_TSLA'], 50)
     data['SMA200_TSLA'] = calculate_sma(data['Close_TSLA'], 200)
@@ -120,21 +126,18 @@ def init_process():
     data['ATR_TSLA'] = calculate_atr(data, 14)
     data['Stochastic_K_TSLA'], data['Stochastic_D_TSLA'] = calculate_stochastic(data)
     data['OBV_TSLA'] = calculate_obv(data['Close_TSLA'], data['Volume_TSLA'])
-
-    # 단기 지표 추가
     data['SMA5_TSLA'] = calculate_sma(data['Close_TSLA'], 5)
     data['SMA10_TSLA'] = calculate_sma(data['Close_TSLA'], 10)
     data['RSI5_TSLA'] = calculate_rsi(data['Close_TSLA'], 5)
     data['MACD_short_TSLA'], data['MACD_signal_short_TSLA'], data['MACD_histogram_short_TSLA'] = calculate_macd(data['Close_TSLA'], 5, 35, 5)
     data['VWAP_TSLA'] = calculate_vwap(data)
-
     weekly_rsi = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14)
     data['Weekly RSI_TSLA'] = weekly_rsi.reindex(data.index, method='ffill').fillna(50)
 
     volatility = get_volatility_for_backtest(data)
 
 def get_volatility_for_backtest(data):
-    """VIX 지수를 로드하고 평균 변동성을 계산합니다."""
+    """VIX 평균 변동성 계산"""
     vix_df = pd.read_csv('VIX-history-2y.csv', skiprows=3, header=None, names=['Date', 'VIX'],
                          parse_dates=['Date'], index_col='Date')
     start_date = data.index.min()
@@ -144,43 +147,42 @@ def get_volatility_for_backtest(data):
     return vix_filtered['VIX'].mean()
 
 def get_dynamic_param_ranges(volatility):
-    """변동성에 따라 동적 파라미터 범위를 설정합니다."""
+    """변동성 기반 파라미터 범위 설정"""
     if volatility > 30:  # 고변동성
         return [
-            (15, 50), (50, 90), (20, 50), (60, 80), (25, 50), (60, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
-            (0.2, 1.0), (0.05, 0.5), (-0.5, -0.05),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
-            (1.0, 3.0), (0.5, 2.0), (0.5, 2.0),  # w_strong_buy, w_weak_buy, w_sell
-            (20, 40), (70, 80),  # stochastic_buy, stochastic_sell
-            (0.5, 2.0), (0.5, 2.0),  # obv_weight, bb_width_weight
-            (20, 40), (60, 80),  # short_rsi_buy, short_rsi_sell
-            (0.05, 0.15), (0.15, 0.3),  # bb_width_low, bb_width_high (수정됨)
-            (0.5, 2.0), (0.5, 2.0)  # w_short_buy, w_short_sell (조정됨)
+            (10, 40), (60, 90), (20, 40), (60, 80), (20, 40), (60, 80),
+            (0.3, 1.5), (0.1, 0.7), (-0.7, -0.1),
+            (1.5, 4.0), (0.5, 2.5), (0.5, 2.5),
+            (15, 35), (65, 85),
+            (0.5, 2.5), (0.5, 2.5),
+            (15, 35), (65, 85),
+            (0.05, 0.2), (0.2, 0.4),
+            (0.5, 2.5), (0.5, 2.5)
         ]
     return [  # 저변동성
-        (20, 40), (60, 85), (25, 40), (65, 80), (30, 40), (65, 85),
-        (0.3, 1.0), (0.1, 0.5), (-0.5, -0.1),
-        (1.5, 3.0), (0.5, 2.0), (0.5, 2.0),
-        (20, 40), (70, 80),
+        (20, 50), (50, 80), (25, 45), (55, 75), (30, 50), (50, 70),
+        (0.2, 1.0), (0.05, 0.5), (-0.5, -0.05),
+        (1.0, 3.0), (0.5, 2.0), (0.5, 2.0),
+        (20, 40), (60, 80),
         (0.5, 2.0), (0.5, 2.0),
         (20, 40), (60, 80),
-        (0.05, 0.15), (0.15, 0.3),  # bb_width_low, bb_width_high (수정됨)
-        (0.5, 2.0), (0.5, 2.0)  # w_short_buy, w_short_sell (조정됨)
+        (0.05, 0.15), (0.15, 0.3),
+        (0.5, 2.0), (0.5, 2.0)
     ]
 
 def get_rsi_trend(rsi_series, window=10):
-    """RSI 추세를 분석합니다."""
+    """RSI 추세 분석"""
     if len(rsi_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """포트폴리오를 목표 비중에 맞춰 조정합니다 (거래 비용 반영)."""
+    """포트폴리오 조정"""
     total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
     required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
     required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
 
-    # TSLA 조정
     if required_tsla_shares > holdings['TSLA']:
         buy_shares = required_tsla_shares - holdings['TSLA']
         cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
@@ -193,7 +195,6 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
         cash += proceeds
         holdings['TSLA'] -= sell_shares
 
-    # TSLL 조정
     if required_tsll_shares > holdings['TSLL']:
         buy_shares = required_tsll_shares - holdings['TSLL']
         cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
@@ -209,17 +210,18 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
     return holdings, cash
 
 def calculate_fitness(portfolio_values):
-    """포트폴리오 성과를 기반으로 피트니스 스코어를 계산합니다."""
+    """피트니스 스코어 계산 (Sharpe + Calmar Ratio)"""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
     sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
     max_drawdown = calculate_max_drawdown(portfolio_values)
     total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
-    return sharpe_ratio * (1 + total_return) / (1 + max_drawdown)
+    calmar_ratio = total_return / max_drawdown if max_drawdown > 0 else 0
+    return (sharpe_ratio + calmar_ratio) / 2
 
 def evaluate(individual, data_subset=None):
-    """롤링 윈도우 백테스팅을 위한 평가 함수입니다."""
+    """백테스트 평가 함수"""
     global data
     if data_subset is None:
         data_subset = data
@@ -236,10 +238,11 @@ def evaluate(individual, data_subset=None):
         "w_short_buy": individual[20], "w_short_sell": individual[21]
     }
 
-    cash = 100000  # 초기 현금
+    cash = 100000
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
     portfolio_values = []
+    reasons_collector = []
 
     for i in range(1, len(data_subset)):
         row = data_subset.iloc[i]
@@ -254,6 +257,7 @@ def evaluate(individual, data_subset=None):
         sma200 = row['SMA200_TSLA']
         macd = row['MACD_TSLA']
         macd_signal = row['MACD_signal_TSLA']
+        macd_histogram = row['MACD_histogram_TSLA']
         volume_change = row['Volume Change_TSLA'] if not pd.isna(row['Volume Change_TSLA']) else 0
         atr = row['ATR_TSLA']
         lower_band = row['Lower Band_TSLA']
@@ -263,16 +267,15 @@ def evaluate(individual, data_subset=None):
         obv = row['OBV_TSLA']
         obv_prev = data_subset['OBV_TSLA'].iloc[i-1] if i > 0 else obv
         bb_width = row['BB_width_TSLA']
-        macd_histogram = row['MACD_histogram_TSLA']
         rsi5 = row['RSI5_TSLA']
         macd_short = row['MACD_short_TSLA']
         macd_signal_short = row['MACD_signal_short_TSLA']
         vwap = row['VWAP_TSLA']
 
-        target_tsll_weight, _ = get_target_tsll_weight(
-            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal,
-            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram,
-            rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params
+        target_tsll_weight, reasons = get_target_tsll_weight(
+            fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram,
+            volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, rsi5, macd_short, macd_signal_short, vwap,
+            current_tsll_weight, params, row.name.strftime('%Y-%m-%d')
         )
         target_tsla_weight = 1 - target_tsll_weight
 
@@ -280,6 +283,7 @@ def evaluate(individual, data_subset=None):
         total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
         portfolio_values.append(total_value)
         current_tsll_weight = (holdings['TSLL'] * row['Close_TSLL']) / total_value if total_value > 0 else 0
+        reasons_collector.append(reasons)
 
     final_value = holdings['TSLA'] * data_subset['Close_TSLA'].iloc[-1] + holdings['TSLL'] * data_subset['Close_TSLL'].iloc[-1] + cash
     portfolio_values.append(final_value)
@@ -288,7 +292,7 @@ def evaluate(individual, data_subset=None):
     return fitness,
 
 def calculate_max_drawdown(portfolio_values):
-    """최대 손실(Maximum Drawdown)을 계산합니다."""
+    """최대 손실 계산"""
     peak = portfolio_values[0]
     max_drawdown = 0
     for value in portfolio_values:
@@ -299,98 +303,33 @@ def calculate_max_drawdown(portfolio_values):
             max_drawdown = drawdown
     return max_drawdown
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, macd_histogram, rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, params):
-    """TSLL의 목표 비중을 계산합니다."""
-    base_weight = current_tsll_weight
-    atr_normalized = atr / close if close > 0 else 0
-    volume_change_strong_buy = params["volume_change_strong_buy"] * (1 + atr_normalized)
-    volume_change_weak_buy = params["volume_change_weak_buy"] * (1 + atr_normalized)
-    volume_change_sell = params["volume_change_sell"] * (1 + atr_normalized)
-
-    # 매수/매도 조건
-    buy_conditions = [
-        fear_greed <= params["fg_buy"],
-        daily_rsi < params["daily_rsi_buy"],
-        (macd > macd_signal) and (macd_signal < 0),
-        volume_change > volume_change_strong_buy,
-        volume_change > volume_change_weak_buy,
-        close < lower_band,
-        (daily_rsi_trend == "Increasing") and (close > sma200),
-        stochastic_k < params["stochastic_buy"],
-        obv > obv_prev,
-        bb_width < params["bb_width_low"],  # 볼린저 밴드 폭 축소
-        macd_histogram > 0,
-        sma5 > sma10,  # 단기 SMA 상향 돌파
-        rsi5 < params["short_rsi_buy"],  # 단기 RSI 과매도
-        macd_short > macd_signal_short,  # 단기 MACD 매수 신호
-        close > vwap  # VWAP 위에 있을 때 매수
-    ]
-
-    sell_conditions = [
-        fear_greed >= params["fg_sell"],
-        daily_rsi > params["daily_rsi_sell"],
-        (macd < macd_signal) and (macd_signal > 0),
-        volume_change < volume_change_sell,
-        close > upper_band,
-        (daily_rsi_trend == "Decreasing") and (close < sma200),
-        stochastic_k > params["stochastic_sell"],
-        obv < obv_prev,
-        bb_width > params["bb_width_high"],  # 볼린저 밴드 폭 확대
-        macd_histogram < 0,
-        sma5 < sma10,  # 단기 SMA 하향 돌파
-        rsi5 > params["short_rsi_sell"],  # 단기 RSI 과매수
-        macd_short < macd_signal_short,  # 단기 MACD 매도 신호
-        close < vwap  # VWAP 아래에 있을 때 매도
-    ]
-
-    # 가중치 적용
-    w_strong_buy = params["w_strong_buy"]
-    w_weak_buy = params["w_weak_buy"]
-    w_sell = params["w_sell"]
-    obv_weight = params["obv_weight"]
-    bb_width_weight = params["bb_width_weight"]
-    w_short_buy = params["w_short_buy"]
-    w_short_sell = params["w_short_sell"]
-
-    # 단기 지표 가중치 적용
-    short_buy_count = sum(buy_conditions[11:])  # 단기 지표 매수 조건
-    short_sell_count = sum(sell_conditions[11:])  # 단기 지표 매도 조건
-
-    buy_adjustment = (w_strong_buy * buy_conditions[3] + w_weak_buy * (buy_conditions[4] + sum(buy_conditions[:3]) + sum(buy_conditions[5:11])) + obv_weight * buy_conditions[8] + bb_width_weight * buy_conditions[9] + w_short_buy * short_buy_count) * 0.1
-    sell_adjustment = (w_sell * sum(sell_conditions[:6]) + obv_weight * sell_conditions[7] + bb_width_weight * sell_conditions[8] + w_short_sell * short_sell_count) * 0.1
-    target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
-
-    return target_weight, []
-
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMax)
 
 toolbox = base.Toolbox()
 
 def clip_individual(ind, param_ranges):
-    """파라미터를 지정된 범위 내로 클리핑합니다."""
+    """파라미터 범위 클리핑"""
     for i in range(len(ind)):
         low, high = param_ranges[i]
         ind[i] = max(low, min(ind[i], high))
     return ind
 
 def cross_validation_evaluation(individual, folds=5):
-    """교차 검증을 통해 평가합니다."""
+    """Time Series Split 교차 검증"""
     global data
-    fold_size = len(data) // folds
+    tscv = TimeSeriesSplit(n_splits=folds)
     fitness_scores = []
 
-    for i in range(folds):
-        start_idx = i * fold_size
-        end_idx = (i + 1) * fold_size if i < folds - 1 else len(data)
-        test_data = data.iloc[start_idx:end_idx]
+    for train_idx, test_idx in tscv.split(data):
+        test_data = data.iloc[test_idx]
         fitness = evaluate(individual, test_data)[0]
         fitness_scores.append(fitness)
 
     return np.mean(fitness_scores),
 
 def setup_toolbox(param_ranges):
-    """DEAP 툴박스를 설정합니다."""
+    """DEAP 툴박스 설정"""
     for i, (low, high) in enumerate(param_ranges):
         toolbox.register(f"attr_{i}", random.uniform, low, high)
 
@@ -408,16 +347,13 @@ def setup_toolbox(param_ranges):
     toolbox.register("select", tools.selTournament, tournsize=3)
 
 def save_best_params(best_params):
-    """최적 파라미터를 JSON 파일로 저장합니다."""
-    data_to_save = {
-        "version": "2.0",
-        "parameters": best_params
-    }
+    """최적 파라미터 저장"""
+    data_to_save = {"version": "2.1", "parameters": best_params}
     with open("optimal_params.json", "w") as f:
         json.dump(data_to_save, f)
 
 def main():
-    """메인 함수: 유전 알고리즘을 실행하고 최적 파라미터를 찾습니다."""
+    """유전 알고리즘 실행"""
     global volatility
     init_process()
     param_ranges = get_dynamic_param_ranges(volatility)
@@ -466,7 +402,7 @@ def main():
         "w_short_buy": best_ind[20], "w_short_sell": best_ind[21]
     }
     print("최적 파라미터:", best_params)
-    print("최대 피트니스 (Calmar Ratio 기반):", evaluate(best_ind)[0])
+    print("최대 피트니스 (Sharpe + Calmar Ratio):", evaluate(best_ind)[0])
 
     save_best_params(best_params)
     pool.close()
