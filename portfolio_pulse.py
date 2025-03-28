@@ -246,7 +246,7 @@ def load_transactions(file_path="transactions.txt"):
         print("transactions.txt file not found. Using initial assets.")
         return {}, 0
     try:
-        df = pd.read_csv(file_path, sep='\s+', names=["date", "ticker", "action", "shares", "stock_price"])
+        df = pd.read_csv(file_path, sep=r'\s+', names=["date", "ticker", "action", "shares", "stock_price"])
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
         holdings = {}
         initial_investment = 0
@@ -375,10 +375,10 @@ def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, c
     short_buy_count = sum(1 for r in buy_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 > SMA10" in r or "Close > VWAP" in r)
     short_sell_count = sum(1 for r in sell_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 < SMA10" in r or "Close < VWAP" in r)
 
-    buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count + 
-                      obv_weight * ("OBV Increasing" in buy_reasons) + bb_width_weight * (f"BB Width < {optimal_params['bb_width_low']}" in buy_reasons) + 
+    buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count +
+                      obv_weight * ("OBV Increasing" in buy_reasons) + bb_width_weight * (f"BB Width < {optimal_params['bb_width_low']}" in buy_reasons) +
                       w_short_buy * short_buy_count) * 0.1
-    sell_adjustment = (w_sell * sell_count + obv_weight * ("OBV Decreasing" in sell_reasons) + 
+    sell_adjustment = (w_sell * sell_count + obv_weight * ("OBV Decreasing" in sell_reasons) +
                        bb_width_weight * (f"BB Width > {optimal_params['bb_width_high']}" in sell_reasons) + w_short_sell * short_sell_count) * 0.1
     target_weight = max(0.0, min(base_weight + buy_adjustment - sell_adjustment, 1.0))
 
