@@ -8,6 +8,7 @@ from tabulate import tabulate
 import json
 import os
 import csv
+from weight_adjustment import get_target_tsll_weight  # 공통 모듈 import
 
 # 초기 설정
 initial_portfolio_value = 100000  # 초기 자산 $100,000
@@ -199,6 +200,18 @@ def get_vwap_note(close, vwap):
     return "Above VWAP" if close > vwap else "Below VWAP" if close < vwap else "On VWAP"
 
 # 파라미터 관리 함수
+def load_optimal_params(file_path="optimal_params.json", latest_version="2.0"):
+    """최적화된 파라미터 로드"""
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            if "version" in data and "parameters" in data and data["version"] == latest_version:
+                return data["parameters"]
+            print("Parameters are outdated or format is incorrect. Using default values.")
+    except Exception:
+        print("Failed to load parameter file. Using dynamic default values.")
+    return get_dynamic_default_params(get_current_vix())
+
 def get_dynamic_default_params(vix):
     if vix is None or vix <= 30:
         return {
@@ -227,18 +240,6 @@ def get_dynamic_default_params(vix):
             "obv_weight": 0.8, "bb_width_weight": 0.8, "short_rsi_buy": 30, "short_rsi_sell": 70,
             "bb_width_low": 0.15, "bb_width_high": 0.25, "w_short_buy": 1.0, "w_short_sell": 1.0
         }
-
-def load_optimal_params(file_path="optimal_params.json", latest_version="2.0"):
-    """최적화된 파라미터 로드"""
-    try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
-            if "version" in data and "parameters" in data and data["version"] == latest_version:
-                return data["parameters"]
-            print("Parameters are outdated or format is incorrect. Using default values.")
-    except Exception:
-        print("Failed to load parameter file. Using dynamic default values.")
-    return get_dynamic_default_params(get_current_vix())
 
 # 포트폴리오 관리 함수
 def load_transactions(file_path="transactions.txt"):
@@ -286,7 +287,7 @@ def load_previous_recommendation(file_path="portfolio_log.csv"):
     try:
         df = pd.read_csv(file_path, names=["date", "tsll_weight", "reasons"])
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        last_entry = df.iloc[-1]  # Fixed typo: Changed REVlast_entry to last_entry
+        last_entry = df.iloc[-1]
         prev_date = last_entry['date'].strftime('%Y-%m-%d')
         tsll_weight = float(last_entry['tsll_weight'])
         reasons_str = last_entry['reasons']
@@ -313,148 +314,31 @@ def save_recommendation(date, tsll_weight, reasons, file_path="portfolio_log.csv
         writer = csv.writer(f)
         writer.writerow([date, tsll_weight, "; ".join(reasons)])
 
-def get_target_tsll_weight(fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram, volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, rsi5, macd_short, macd_signal_short, vwap, current_tsll_weight, optimal_params, data_date):
-    """TSLL 목표 비중 계산 및 이유 생성"""
-    base_weight = current_tsll_weight
-    atr_normalized = atr / close if close > 0 else 0
-    volume_change_strong_buy = optimal_params["volume_change_strong_buy"] * (1 + atr_normalized)
-    volume_change_weak_buy = optimal_params["volume_change_weak_buy"] * (1 + atr_normalized)
-    volume_change_sell = optimal_params["volume_change_sell"] * (1 + atr_normalized)
-
-    buy_conditions = {
-        f"Fear & Greed Index ≤ {optimal_params['fg_buy']}": fear_greed <= optimal_params["fg_buy"],
-        f"Daily RSI < {optimal_params['daily_rsi_buy']}": daily_rsi < optimal_params["daily_rsi_buy"],
-        f"Weekly RSI < {optimal_params['weekly_rsi_buy']}": weekly_rsi < optimal_params["weekly_rsi_buy"],
-        "MACD > Signal (Signal < 0)": (macd > macd_signal) and (macd_signal < 0),
-        "MACD Histogram > 0": macd_histogram > 0,
-        f"Volume Change > {volume_change_strong_buy:.2f} (Strong Buy)": volume_change > volume_change_strong_buy,
-        f"Volume Change > {volume_change_weak_buy:.2f} (Weak Buy)": volume_change > volume_change_weak_buy,
-        "Close < Lower Band": close < lower_band,
-        "RSI Increasing & Close > SMA200": (daily_rsi_trend == "Increasing") and (close > sma200),
-        f"Stochastic %K < {optimal_params['stochastic_buy']}": stochastic_k < optimal_params["stochastic_buy"],
-        "OBV Increasing": obv > obv_prev,
-        f"BB Width < {optimal_params['bb_width_low']}": bb_width < optimal_params["bb_width_low"],
-        "SMA5 > SMA10": sma5 > sma10,
-        f"Short RSI < {optimal_params['short_rsi_buy']}": rsi5 < optimal_params["short_rsi_buy"],
-        "Short MACD > Signal": macd_short > macd_signal_short,
-        "Close > VWAP": close > vwap
-    }
-
-    sell_conditions = {
-        f"Fear & Greed Index ≥ {optimal_params['fg_sell']}": fear_greed >= optimal_params["fg_sell"],
-        f"Daily RSI > {optimal_params['daily_rsi_sell']}": daily_rsi > optimal_params["daily_rsi_sell"],
-        f"Weekly RSI > {optimal_params['weekly_rsi_sell']}": weekly_rsi > optimal_params["weekly_rsi_sell"],
-        "MACD < Signal (Signal > 0)": (macd < macd_signal) and (macd_signal > 0),
-        "MACD Histogram < 0": macd_histogram < 0,
-        f"Volume Change < {volume_change_sell:.2f}": volume_change < volume_change_sell,
-        "Close > Upper Band": close > upper_band,
-        "RSI Decreasing & Close < SMA200": (daily_rsi_trend == "Decreasing") and (close < sma200),
-        f"Stochastic %K > {optimal_params['stochastic_sell']}": stochastic_k > optimal_params["stochastic_sell"],
-        "OBV Decreasing": obv < obv_prev,
-        f"BB Width > {optimal_params['bb_width_high']}": bb_width > optimal_params["bb_width_high"],
-        "SMA5 < SMA10": sma5 < sma10,
-        f"Short RSI > {optimal_params['short_rsi_sell']}": rsi5 > optimal_params["short_rsi_sell"],
-        "Short MACD < Signal": macd_short < macd_signal_short,
-        "Close < VWAP": close < vwap
-    }
-
-    buy_reasons = [cond for cond, val in buy_conditions.items() if val]
-    sell_reasons = [cond for cond, val in sell_conditions.items() if val]
-
-    w_strong_buy = optimal_params["w_strong_buy"]
-    w_weak_buy = optimal_params["w_weak_buy"]
-    w_sell = optimal_params["w_sell"]
-    obv_weight = optimal_params["obv_weight"]
-    bb_width_weight = optimal_params["bb_width_weight"]
-    w_short_buy = optimal_params["w_short_buy"]
-    w_short_sell = optimal_params["w_short_sell"]
-
-    strong_buy_count = sum(1 for r in buy_reasons if "Strong Buy" in r)
-    weak_buy_count = sum(1 for r in buy_reasons if "Weak Buy" in r and "Strong Buy" not in r)
-    other_buy_count = len(buy_reasons) - strong_buy_count - weak_buy_count
-    sell_count = len(sell_reasons)
-    short_buy_count = sum(1 for r in buy_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 > SMA10" in r or "Close > VWAP" in r)
-    short_sell_count = sum(1 for r in sell_reasons if "Short RSI" in r or "Short MACD" in r or "SMA5 < SMA10" in r or "Close < VWAP" in r)
-
-    buy_adjustment = (w_strong_buy * strong_buy_count + w_weak_buy * weak_buy_count + w_weak_buy * other_buy_count +
-                      obv_weight * ("OBV Increasing" in buy_reasons) + bb_width_weight * (f"BB Width < {optimal_params['bb_width_low']}" in buy_reasons) +
-                      w_short_buy * short_buy_count) * 0.1
-    sell_adjustment = (w_sell * sell_count + obv_weight * ("OBV Decreasing" in sell_reasons) +
-                       bb_width_weight * (f"BB Width > {optimal_params['bb_width_high']}" in sell_reasons) + w_short_sell * short_sell_count) * 0.1
-
-    # 이유 리스트 초기화
-    reasons_list = []
-
-    # 과매수/과매도 조건 반영
-    if rsi5 > optimal_params["short_rsi_sell"]:  # RSI5 > 70
-        buy_adjustment *= 0.5  # 매수 조정량 절반으로 감소
-        sell_reasons.append("Overbought RSI5 detected")
-    elif rsi5 < optimal_params["short_rsi_buy"]:  # RSI5 < 30
-        buy_adjustment *= 1.5  # 매수 조정량 증가
-        buy_reasons.append("Oversold RSI5 detected")
-
-    # 변동성 기반 비중 조정 (ATR 활용)
-    atr_percentage = atr / close if close > 0 else 0
-    volatility_factor = 1.0
-    if atr_percentage > 0.05:  # 변동성 5% 이상
-        volatility_factor = 0.7  # TSLL 비중 30% 감소
-        sell_reasons.append("High volatility detected (ATR > 5%)")
-    elif atr_percentage < 0.02:  # 변동성 2% 미만
-        volatility_factor = 1.2  # TSLL 비중 20% 증가 가능
-        buy_reasons.append("Low volatility detected (ATR < 2%)")
-
-    # 초기 목표 비중 계산
-    preliminary_target_weight = base_weight + buy_adjustment - sell_adjustment
-    preliminary_target_weight *= volatility_factor
-
-    # 점진적 비중 조정 적용
-    weight_change = preliminary_target_weight - base_weight
-    if abs(weight_change) > MAX_WEIGHT_CHANGE:
-        target_weight = base_weight + (MAX_WEIGHT_CHANGE if weight_change > 0 else -MAX_WEIGHT_CHANGE)
-        reasons_list.append(f"Weight change limited to {MAX_WEIGHT_CHANGE*100:.0f}% per day")
-    else:
-        target_weight = preliminary_target_weight
-
-    target_weight = max(0.0, min(target_weight, 1.0))
-
-    # 이유 리스트 작성
-    if buy_reasons:
-        reasons_list.append("Buy Signals (Potential increase in TSLL weight):")
-        reasons_list.extend(f"  - {r}" for r in buy_reasons)
-    if sell_reasons:
-        reasons_list.append("Sell Signals (Potential decrease in TSLL weight):")
-        reasons_list.extend(f"  - {r}" for r in sell_reasons)
-    if not buy_reasons and not sell_reasons:
-        reasons_list.append("- No significant signals detected.")
-
-    save_recommendation(data_date, target_weight, reasons_list)
-    return target_weight, reasons_list
-
 def adjust_portfolio(target_tsla_weight, target_tsll_weight, current_holdings, total_value, tsla_close, tsll_close):
     """포트폴리오 조정 계산 및 출력 (거래 비용 0.1% 반영)"""
     TRANSACTION_COST = 0.001  # 거래 비용 0.1%
     current_tsla_shares = current_holdings.get("TSLA", 0)
     current_tsll_shares = current_holdings.get("TSLL", 0)
-
+    
     # 목표 가치 계산
     target_tsla_value = target_tsla_weight * total_value
     target_tsll_value = target_tsll_weight * total_value
-
+    
     # 거래 비용 반영: 매수 시 비용 추가, 매도 시 비용 감소
     tsla_cost_factor = 1 + TRANSACTION_COST  # 매수 시 0.1% 추가
     tsla_proceed_factor = 1 - TRANSACTION_COST  # 매도 시 0.1% 감소
     tsll_cost_factor = 1 + TRANSACTION_COST
     tsll_proceed_factor = 1 - TRANSACTION_COST
-
+    
     # 목표 주식 수 계산
     current_tsla_weight = current_tsla_shares * tsla_close / total_value if total_value > 0 else 0
     current_tsll_weight = current_tsll_shares * tsll_close / total_value if total_value > 0 else 0
     target_tsla_shares = int(target_tsla_value / (tsla_close * tsla_cost_factor)) if target_tsla_weight > current_tsla_weight else int(target_tsla_value / (tsla_close * tsla_proceed_factor))
     target_tsll_shares = int(target_tsll_value / (tsll_close * tsll_cost_factor)) if target_tsll_weight > current_tsll_weight else int(target_tsll_value / (tsll_close * tsll_proceed_factor))
-
+    
     tsla_diff = target_tsla_shares - current_tsla_shares
     tsll_diff = target_tsll_shares - current_tsll_shares
-
+    
     if tsla_diff == 0 and tsll_diff == 0:
         print(" - No adjustment needed")
     else:
@@ -622,6 +506,7 @@ def analyze_and_recommend():
             print("\n### Adjustment Reasons")
             for reason in reasons:
                 print(reason)
+            save_recommendation(data_date, target_tsll_weight, reasons)
     else:
         print("\n### Recommended Portfolio Weights")
         target_tsll_weight, reasons = get_target_tsll_weight(
@@ -637,6 +522,7 @@ def analyze_and_recommend():
         print("\n### Adjustment Reasons")
         for reason in reasons:
             print(reason)
+        save_recommendation(data_date, target_tsll_weight, reasons)
 
 if __name__ == "__main__":
     analyze_and_recommend()
