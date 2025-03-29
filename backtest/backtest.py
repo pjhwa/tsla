@@ -17,9 +17,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from weight_adjustment import get_target_tsll_weight
 
 # 상수 정의
-POPULATION_SIZE = 1000  # 탐색 범위 확대
-NUM_GENERATIONS = 300  # 최적화 심화
-PATIENCE = 50  # 조기 종료 인내심 증가
+POPULATION_SIZE = 1000  # 유전 알고리즘 탐색 범위 확대
+NUM_GENERATIONS = 300  # 최적화 반복 횟수 증가
+PATIENCE = 50  # 조기 종료를 위한 인내심 증가
 TRANSACTION_COST = 0.003  # 거래 비용 현실화 (0.3%)
 MAX_POSITION_SIZE = 0.8  # 최대 포지션 크기 제한 (80%)
 STOP_LOSS_THRESHOLD = -0.05  # 손절매 기준 (-5%)
@@ -134,7 +134,7 @@ def calculate_max_drawdown(portfolio_values):
     return -np.max(drawdowns) if len(drawdowns) > 0 else 0
 
 def calculate_fitness(portfolio_values):
-    """피트니스 함수 개선"""
+    """피트니스 함수 개선: 하방 리스크와 수익률 강조"""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
@@ -143,7 +143,6 @@ def calculate_fitness(portfolio_values):
     total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
     calmar_ratio = calculate_calmar_ratio(total_return, max_drawdown)
     sortino_ratio = calculate_sortino_ratio(returns)
-    # 하방 리스크와 수익률 강조
     fitness = (0.1 * sharpe_ratio + 0.3 * calmar_ratio + 0.3 * total_return + 0.3 * sortino_ratio)
     return fitness
 
@@ -199,28 +198,28 @@ def get_volatility_for_backtest(data):
     return vix_filtered['VIX'].mean()
 
 def get_dynamic_param_ranges(volatility):
-    """변동성 기반 동적 파라미터 범위"""
+    """변동성 기반 동적 파라미터 범위 설정"""
     if volatility > 30:  # 고변동성 환경
         return [
-            (10, 35), (65, 90), (15, 35), (65, 85), (20, 40), (60, 80),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
-            (0.6, 2.0), (0.2, 1.0), (-1.0, -0.3),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
-            (2.0, 4.0), (1.0, 2.5), (1.5, 3.5),  # w_strong_buy, w_weak_buy, w_sell
-            (15, 30), (75, 90),  # stochastic_buy, stochastic_sell
-            (0.5, 2.0), (0.5, 2.0),  # obv_weight, bb_width_weight
-            (20, 35), (65, 80),  # short_rsi_buy, short_rsi_sell
+            (20, 40), (60, 80), (20, 40), (60, 80), (25, 45), (55, 75),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
+            (1.5, 2.5), (1.1, 1.5), (-1.0, -0.5),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
+            (1.0, 2.0), (0.5, 1.5), (1.0, 2.0),  # w_strong_buy, w_weak_buy, w_sell
+            (15, 35), (65, 85),  # stochastic_buy, stochastic_sell
+            (0.5, 1.5), (0.5, 1.5),  # obv_weight, bb_width_weight
+            (20, 40), (60, 80),  # short_rsi_buy, short_rsi_sell
             (0.1, 0.3), (0.25, 0.5),  # bb_width_low, bb_width_high
-            (1.0, 2.5), (1.0, 2.5)  # w_short_buy, w_short_sell
+            (1.0, 2.0), (1.0, 2.0)  # w_short_buy, w_short_sell
         ]
     else:  # 저변동성 환경
         return [
-            (15, 40), (60, 85), (20, 40), (60, 80), (25, 45), (55, 75),
-            (0.4, 1.5), (0.1, 0.8), (-0.8, -0.1),
-            (1.5, 3.5), (0.8, 2.0), (1.0, 3.0),
-            (20, 35), (70, 85),
-            (0.3, 1.5), (0.3, 1.5),
-            (25, 40), (60, 75),
-            (0.05, 0.2), (0.15, 0.4),
-            (0.8, 2.0), (0.8, 2.0)
+            (25, 45), (55, 75), (25, 45), (55, 75), (30, 50), (50, 70),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
+            (1.2, 2.0), (1.0, 1.3), (-0.8, -0.3),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
+            (0.8, 1.8), (0.3, 1.2), (0.8, 1.8),  # w_strong_buy, w_weak_buy, w_sell
+            (20, 40), (60, 80),  # stochastic_buy, stochastic_sell
+            (0.3, 1.2), (0.3, 1.2),  # obv_weight, bb_width_weight
+            (25, 45), (55, 75),  # short_rsi_buy, short_rsi_sell
+            (0.05, 0.2), (0.15, 0.4),  # bb_width_low, bb_width_high
+            (0.8, 1.5), (0.8, 1.5)  # w_short_buy, w_short_sell
         ]
 
 def evaluate_individual(individual, fold_data):
@@ -234,6 +233,14 @@ def evaluate_individual(individual, fold_data):
         "bb_width_low": individual[18], "bb_width_high": individual[19], "w_short_buy": individual[20], "w_short_sell": individual[21]
     }
 
+    # 논리적 제약: 매도 값이 매수 값보다 높아야 함
+    if (params["daily_rsi_sell"] <= params["daily_rsi_buy"] or 
+        params["weekly_rsi_sell"] <= params["weekly_rsi_buy"] or 
+        params["stochastic_sell"] <= params["stochastic_buy"] or 
+        params["short_rsi_sell"] <= params["short_rsi_buy"] or 
+        params["bb_width_high"] <= params["bb_width_low"]):
+        return -np.inf,  # 부적합한 개체는 낮은 피트니스로 설정
+
     cash = 100000
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
@@ -245,7 +252,7 @@ def evaluate_individual(individual, fold_data):
         fear_greed = row['y']
         daily_rsi = row['RSI_TSLA']
         weekly_rsi = row['Weekly RSI_TSLA']
-        daily_rsi_trend = "Stable" if i < 10 else linregress(range(10), fold_data['RSI_TSLA'].iloc[i-10:i])[0] > 0 and "Increasing" or "Decreasing"
+        daily_rsi_trend = "Stable" if i < 10 else ("Increasing" if linregress(range(10), fold_data['RSI_TSLA'].iloc[i-10:i])[0] > 0 else "Decreasing")
         close = row['Close_TSLA']
         sma5 = row['SMA5_TSLA']
         sma10 = row['SMA10_TSLA']
@@ -278,7 +285,7 @@ def evaluate_individual(individual, fold_data):
 
         if abs(target_tsll_weight - prev_target_tsll_weight) > 0.01:
             total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
-            if total_value / 100000 - 1 < STOP_LOSS_THRESHOLD:  # 손절매
+            if total_value / 100000 - 1 < STOP_LOSS_THRESHOLD:  # 손절매 적용
                 cash += holdings['TSLA'] * row['Close_TSLA'] * (1 - TRANSACTION_COST) + holdings['TSLL'] * row['Close_TSLL'] * (1 - TRANSACTION_COST)
                 holdings['TSLA'], holdings['TSLL'] = 0, 0
             else:
@@ -373,7 +380,7 @@ def optimize_parameters():
         best_ind = tools.selBest(population, k=1)[0]
         fitness_scores.append(best_ind.fitness.values[0])
 
-    # 최종 최적 파라미터
+    # 최종 최적 파라미터 계산
     best_population = toolbox.population(n=POPULATION_SIZE)
     fits = list(map(lambda ind: evaluate_individual(ind, data), best_population))
     for fit, ind in zip(fits, best_population):
