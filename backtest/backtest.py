@@ -17,9 +17,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from weight_adjustment import get_target_tsll_weight
 
 # 상수 정의
-POPULATION_SIZE = 400  # 인구 크기 증가로 탐색 범위 확대
-NUM_GENERATIONS = 200  # 세대 수 증가로 더 깊은 최적화
-PATIENCE = 25  # 조기 종료 인내심 증가
+POPULATION_SIZE = 500  # 인구 크기 증가로 탐색 범위 확대
+NUM_GENERATIONS = 250  # 세대 수 증가로 더 깊은 최적화
+PATIENCE = 30  # 조기 종료 인내심 증가
 TRANSACTION_COST = 0.002  # 거래 비용 0.2% (슬리피지 포함)
 
 # 전역 변수
@@ -130,6 +130,12 @@ def calculate_omega_ratio(returns, threshold=0.0):
     omega_ratio = positive_returns / negative_returns if negative_returns > 0 else float('inf')
     return omega_ratio
 
+def calculate_sterling_ratio(returns, max_drawdown):
+    """Sterling Ratio 계산"""
+    avg_annual_return = np.mean(returns) * 252  # 연평균 수익률 (252 거래일 가정)
+    sterling_ratio = avg_annual_return / abs(max_drawdown) if max_drawdown < 0 else float('inf')
+    return sterling_ratio
+
 def init_process():
     """데이터 초기화 및 지표 계산"""
     global data, volatility
@@ -188,23 +194,23 @@ def get_dynamic_param_ranges(volatility):
     if volatility > 30:  # 높은 변동성 환경
         return [
             (5, 30), (70, 95), (10, 30), (70, 90), (10, 30), (70, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
-            (0.5, 2.0), (0.2, 1.0), (-1.0, -0.2),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
-            (2.5, 5.5), (1.5, 3.5), (1.5, 4.0),  # w_strong_buy, w_weak_buy 상향 조정, w_sell
+            (0.5, 2.5), (0.2, 1.2), (-1.2, -0.2),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell (범위 확장)
+            (2.5, 5.5), (1.5, 3.5), (2.0, 4.5),  # w_strong_buy, w_weak_buy, w_sell (매도 가중치 상향)
             (10, 30), (80, 95),  # stochastic_buy, stochastic_sell
             (0.5, 3.0), (1.0, 4.0),  # obv_weight, bb_width_weight
             (10, 30), (70, 90),  # short_rsi_buy, short_rsi_sell
-            (0.05, 0.3), (0.3, 0.5),  # bb_width_low, bb_width_high
-            (1.5, 3.5), (1.0, 3.0)  # w_short_buy 상향 조정, w_short_sell
+            (0.05, 0.35), (0.3, 0.6),  # bb_width_low, bb_width_high (범위 확장)
+            (1.5, 3.5), (1.5, 3.5)  # w_short_buy, w_short_sell (단기 매도 가중치 상향)
         ]
     return [  # 낮은 변동성 환경
         (15, 40), (60, 90), (15, 35), (65, 85), (15, 35), (65, 85),
-        (0.4, 1.5), (0.1, 0.8), (-0.8, -0.1),
-        (2.0, 4.5), (1.0, 3.0), (1.0, 3.0),  # w_strong_buy, w_weak_buy 상향 조정, w_sell
+        (0.4, 1.8), (0.1, 0.9), (-0.9, -0.1),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell (범위 확장)
+        (2.0, 4.5), (1.0, 3.0), (1.5, 3.5),  # w_strong_buy, w_weak_buy, w_sell (매도 가중치 상향)
         (15, 35), (75, 90),
         (0.5, 2.5), (0.5, 2.5),
         (15, 35), (65, 85),
-        (0.05, 0.25), (0.25, 0.45),
-        (1.0, 3.0), (0.5, 2.5)  # w_short_buy 상향 조정
+        (0.05, 0.3), (0.25, 0.5),  # bb_width_low, bb_width_high (범위 확장)
+        (1.0, 3.0), (1.0, 3.0)  # w_short_buy, w_short_sell (단기 매도 가중치 상향)
     ]
 
 def get_rsi_trend(rsi_series, window=10):
@@ -247,7 +253,7 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
     return holdings, cash
 
 def calculate_fitness(portfolio_values):
-    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega Ratio 가중합)"""
+    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega, Sterling Ratio 가중합)"""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
@@ -257,8 +263,9 @@ def calculate_fitness(portfolio_values):
     calmar_ratio = total_return / max_drawdown if max_drawdown > 0 else 0
     sortino_ratio = calculate_sortino_ratio(returns)
     omega_ratio = calculate_omega_ratio(returns)
-    # 가중치 조정: Total Return과 Omega Ratio 강조
-    return 0.15 * sharpe_ratio + 0.15 * calmar_ratio + 0.25 * total_return + 0.25 * sortino_ratio + 0.2 * omega_ratio
+    sterling_ratio = calculate_sterling_ratio(returns, max_drawdown)
+    # 가중치 조정: Total Return, Sortino, Omega, Sterling 강조
+    return 0.1 * sharpe_ratio + 0.1 * calmar_ratio + 0.2 * total_return + 0.2 * sortino_ratio + 0.2 * omega_ratio + 0.2 * sterling_ratio
 
 def evaluate(individual, data_subset=None):
     """백테스트 평가"""
@@ -355,7 +362,7 @@ def clip_individual(ind, param_ranges):
         ind[i] = max(low, min(ind[i], high))
     return ind
 
-def cross_validation_evaluation(individual, folds=15):  # 교차 검증 fold 수 증가
+def cross_validation_evaluation(individual, folds=20):  # 교차 검증 fold 수 증가
     """Time Series Split 교차 검증"""
     global data
     tscv = TimeSeriesSplit(n_splits=folds)
@@ -388,7 +395,7 @@ def setup_toolbox(param_ranges):
 
 def save_best_params(best_params):
     """최적 파라미터 저장"""
-    data_to_save = {"version": "2.4", "parameters": best_params}
+    data_to_save = {"version": "2.5", "parameters": best_params}
     with open("optimal_params.json", "w") as f:
         json.dump(data_to_save, f)
 
@@ -446,7 +453,7 @@ def main():
         "w_short_buy": best_ind[20], "w_short_sell": best_ind[21]
     }
     print("Optimal Parameters:", best_params)
-    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, Sortino, and Omega Ratio):", evaluate(best_ind)[0])
+    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, Sortino, Omega, and Sterling Ratio):", evaluate(best_ind)[0])
 
     save_best_params(best_params)
     pool.close()
