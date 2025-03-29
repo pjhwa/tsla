@@ -11,26 +11,26 @@ import sys
 from sklearn.model_selection import TimeSeriesSplit
 import logging
 
-# Add parent directory to sys.path
+# 부모 디렉토리 추가
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from weight_adjustment import get_target_tsll_weight
 
-# Constants
-POPULATION_SIZE = 300  # Increased population size for broader search space
-NUM_GENERATIONS = 150  # Increased generations for deeper optimization
-PATIENCE = 20  # Increased patience for early stopping
-TRANSACTION_COST = 0.002  # Transaction cost 0.2% (including slippage)
+# 상수 정의
+POPULATION_SIZE = 400  # 인구 크기 증가로 탐색 범위 확대
+NUM_GENERATIONS = 200  # 세대 수 증가로 더 깊은 최적화
+PATIENCE = 25  # 조기 종료 인내심 증가
+TRANSACTION_COST = 0.002  # 거래 비용 0.2% (슬리피지 포함)
 
-# Global variables
+# 전역 변수
 data = None
 volatility = None
 
-# Logging setup
+# 로깅 설정
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume', header=0, names=None):
-    """Load and preprocess CSV data"""
+    """CSV 파일 로드 및 전처리"""
     if not os.path.exists(file_path):
         error_message = f"Error: '{file_path}' file not found. Please run 'collect_market_data.py' to generate the required data files."
         print(error_message)
@@ -44,7 +44,7 @@ def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volum
     return df
 
 def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
-    """Merge dataframes"""
+    """데이터프레임 병합"""
     data = pd.merge(tsla_df, tsll_df, on='Date', suffixes=('_TSLA', '_TSLL'))
     data = pd.merge(data, fear_greed_df, left_on='Date', right_on='date')
     data.set_index('Date', inplace=True)
@@ -53,7 +53,7 @@ def merge_dataframes(tsla_df, tsll_df, fear_greed_df):
     return data
 
 def calculate_rsi(series, timeperiod=14):
-    """Calculate RSI"""
+    """RSI 계산"""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).rolling(window=timeperiod).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=timeperiod).mean()
@@ -61,11 +61,11 @@ def calculate_rsi(series, timeperiod=14):
     return (100 - (100 / (1 + rs))).interpolate(method='linear')
 
 def calculate_sma(series, timeperiod=20):
-    """Calculate SMA"""
+    """SMA 계산"""
     return series.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
-    """Calculate MACD"""
+    """MACD 계산"""
     ema_fast = series.ewm(span=fastperiod, adjust=False).mean()
     ema_slow = series.ewm(span=slowperiod, adjust=False).mean()
     macd = ema_fast - ema_slow
@@ -74,7 +74,7 @@ def calculate_macd(series, fastperiod=12, slowperiod=26, signalperiod=9):
     return macd.interpolate(method='linear'), macd_signal.interpolate(method='linear'), macd_histogram.interpolate(method='linear')
 
 def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
-    """Calculate Bollinger Bands"""
+    """볼린저 밴드 계산"""
     sma = series.rolling(window=timeperiod).mean()
     std = series.rolling(window=timeperiod).std()
     upper = sma + (std * nbdevup)
@@ -82,7 +82,7 @@ def calculate_bollinger_bands(series, timeperiod=20, nbdevup=2, nbdevdn=2):
     return upper.interpolate(method='linear'), sma.interpolate(method='linear'), lower.interpolate(method='linear')
 
 def calculate_atr(df, timeperiod=14):
-    """Calculate ATR"""
+    """ATR 계산"""
     high_low = df['High_TSLA'] - df['Low_TSLA']
     high_close = np.abs(df['High_TSLA'] - df['Close_TSLA'].shift())
     low_close = np.abs(df['Low_TSLA'] - df['Close_TSLA'].shift())
@@ -90,7 +90,7 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """Calculate Stochastic Oscillator"""
+    """스토캐스틱 오실레이터 계산"""
     low_min = df['Low_TSLA'].rolling(window=k_period).min()
     high_max = df['High_TSLA'].rolling(window=k_period).max()
     k = 100 * ((df['Close_TSLA'] - low_min) / (high_max - low_min))
@@ -98,7 +98,7 @@ def calculate_stochastic(df, k_period=14, d_period=3):
     return k.interpolate(method='linear'), d.interpolate(method='linear')
 
 def calculate_obv(close, volume):
-    """Calculate OBV"""
+    """OBV 계산"""
     obv = [0]
     for i in range(1, len(close)):
         if close.iloc[i] > close.iloc[i-1]:
@@ -110,20 +110,28 @@ def calculate_obv(close, volume):
     return pd.Series(obv, index=close.index).interpolate(method='linear')
 
 def calculate_vwap(df):
-    """Calculate VWAP"""
+    """VWAP 계산"""
     vwap = (df['Close_TSLA'] * df['Volume_TSLA']).cumsum() / df['Volume_TSLA'].cumsum()
     return vwap
 
 def calculate_sortino_ratio(returns, risk_free_rate=0.0):
-    """Calculate Sortino Ratio"""
+    """Sortino Ratio 계산"""
     downside_returns = returns[returns < 0]
     expected_return = np.mean(returns)
     downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else 0
     sortino_ratio = (expected_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
     return sortino_ratio
 
+def calculate_omega_ratio(returns, threshold=0.0):
+    """Omega Ratio 계산"""
+    excess_returns = returns - threshold
+    positive_returns = excess_returns[excess_returns > 0].sum()
+    negative_returns = -excess_returns[excess_returns < 0].sum()
+    omega_ratio = positive_returns / negative_returns if negative_returns > 0 else float('inf')
+    return omega_ratio
+
 def init_process():
-    """Initialize data and calculate indicators"""
+    """데이터 초기화 및 지표 계산"""
     global data, volatility
     try:
         fear_greed_df = load_and_preprocess_data('fear_greed_2years.csv', date_column='date')
@@ -131,7 +139,7 @@ def init_process():
         tsll_df = load_and_preprocess_data('TSLL-history-2y.csv')
         vix_df = load_and_preprocess_data('VIX-history-2y.csv', date_column='Date', volume_column=None, header=3, names=['Date', 'Close'])
     except FileNotFoundError:
-        sys.exit(1)  # Exit if files are missing
+        sys.exit(1)  # 파일이 없으면 스크립트 종료
 
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df)
 
@@ -159,7 +167,7 @@ def init_process():
     volatility = get_volatility_for_backtest(data)
 
 def get_volatility_for_backtest(data):
-    """Calculate average VIX volatility"""
+    """VIX 평균 변동성 계산"""
     try:
         vix_df = pd.read_csv('VIX-history-2y.csv', skiprows=3, header=None, names=['Date', 'VIX'],
                              parse_dates=['Date'], index_col='Date')
@@ -176,38 +184,38 @@ def get_volatility_for_backtest(data):
     return vix_filtered['VIX'].mean()
 
 def get_dynamic_param_ranges(volatility):
-    """Set parameter ranges based on volatility (aggressive adjustments)"""
-    if volatility > 30:  # High volatility environment
+    """변동성에 따라 파라미터 범위 설정 (공격적으로 조정)"""
+    if volatility > 30:  # 높은 변동성 환경
         return [
             (5, 30), (70, 95), (10, 30), (70, 90), (10, 30), (70, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
             (0.5, 2.0), (0.2, 1.0), (-1.0, -0.2),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
-            (2.0, 5.0), (1.0, 3.0), (1.5, 4.0),  # w_strong_buy, w_weak_buy, w_sell (increased sell weight)
+            (2.5, 5.5), (1.5, 3.5), (1.5, 4.0),  # w_strong_buy, w_weak_buy 상향 조정, w_sell
             (10, 30), (80, 95),  # stochastic_buy, stochastic_sell
-            (0.5, 3.0), (1.0, 4.0),  # obv_weight, bb_width_weight (increased volatility weight)
+            (0.5, 3.0), (1.0, 4.0),  # obv_weight, bb_width_weight
             (10, 30), (70, 90),  # short_rsi_buy, short_rsi_sell
             (0.05, 0.3), (0.3, 0.5),  # bb_width_low, bb_width_high
-            (1.0, 3.0), (1.0, 3.0)  # w_short_buy, w_short_sell
+            (1.5, 3.5), (1.0, 3.0)  # w_short_buy 상향 조정, w_short_sell
         ]
-    return [  # Low volatility environment
+    return [  # 낮은 변동성 환경
         (15, 40), (60, 90), (15, 35), (65, 85), (15, 35), (65, 85),
         (0.4, 1.5), (0.1, 0.8), (-0.8, -0.1),
-        (1.5, 4.0), (0.5, 2.5), (1.0, 3.0),  # w_sell increased
+        (2.0, 4.5), (1.0, 3.0), (1.0, 3.0),  # w_strong_buy, w_weak_buy 상향 조정, w_sell
         (15, 35), (75, 90),
         (0.5, 2.5), (0.5, 2.5),
         (15, 35), (65, 85),
         (0.05, 0.25), (0.25, 0.45),
-        (0.5, 2.5), (0.5, 2.5)
+        (1.0, 3.0), (0.5, 2.5)  # w_short_buy 상향 조정
     ]
 
 def get_rsi_trend(rsi_series, window=10):
-    """Analyze RSI trend"""
+    """RSI 추세 분석"""
     if len(rsi_series) < window:
         return "Stable"
     slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
     return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
 
 def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """Adjust portfolio"""
+    """포트폴리오 조정"""
     total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
     required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
     required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
@@ -239,7 +247,7 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
     return holdings, cash
 
 def calculate_fitness(portfolio_values):
-    """Calculate fitness score (weighted Sharpe, Calmar, Total Return, and Sortino Ratio)"""
+    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega Ratio 가중합)"""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
@@ -248,11 +256,12 @@ def calculate_fitness(portfolio_values):
     total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
     calmar_ratio = total_return / max_drawdown if max_drawdown > 0 else 0
     sortino_ratio = calculate_sortino_ratio(returns)
-    # Adjusted weights: higher emphasis on Total Return and Sortino Ratio
-    return 0.2 * sharpe_ratio + 0.2 * calmar_ratio + 0.3 * total_return + 0.3 * sortino_ratio
+    omega_ratio = calculate_omega_ratio(returns)
+    # 가중치 조정: Total Return과 Omega Ratio 강조
+    return 0.15 * sharpe_ratio + 0.15 * calmar_ratio + 0.25 * total_return + 0.25 * sortino_ratio + 0.2 * omega_ratio
 
 def evaluate(individual, data_subset=None):
-    """Evaluate backtest"""
+    """백테스트 평가"""
     global data
     if data_subset is None:
         data_subset = data
@@ -323,7 +332,7 @@ def evaluate(individual, data_subset=None):
     return fitness,
 
 def calculate_max_drawdown(portfolio_values):
-    """Calculate maximum drawdown"""
+    """최대 손실 계산"""
     peak = portfolio_values[0]
     max_drawdown = 0
     for value in portfolio_values:
@@ -340,14 +349,14 @@ creator.create("Individual", list, fitness=creator.FitnessMax)
 toolbox = base.Toolbox()
 
 def clip_individual(ind, param_ranges):
-    """Clip parameters to ranges"""
+    """파라미터 범위 클리핑"""
     for i in range(len(ind)):
         low, high = param_ranges[i]
         ind[i] = max(low, min(ind[i], high))
     return ind
 
-def cross_validation_evaluation(individual, folds=10):
-    """Time Series Split cross-validation"""
+def cross_validation_evaluation(individual, folds=15):  # 교차 검증 fold 수 증가
+    """Time Series Split 교차 검증"""
     global data
     tscv = TimeSeriesSplit(n_splits=folds)
     fitness_scores = []
@@ -360,7 +369,7 @@ def cross_validation_evaluation(individual, folds=10):
     return np.mean(fitness_scores),
 
 def setup_toolbox(param_ranges):
-    """Setup DEAP toolbox"""
+    """DEAP 툴박스 설정"""
     for i, (low, high) in enumerate(param_ranges):
         toolbox.register(f"attr_{i}", random.uniform, low, high)
 
@@ -374,22 +383,22 @@ def setup_toolbox(param_ranges):
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     toolbox.register("evaluate", cross_validation_evaluation)
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
-    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.4)  # Increased mutation probability
-    toolbox.register("select", tools.selTournament, tournsize=5)  # Stronger selection pressure
+    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.5)  # 변이 확률 증가
+    toolbox.register("select", tools.selTournament, tournsize=7)  # 선택 압력 강화
 
 def save_best_params(best_params):
-    """Save optimal parameters"""
-    data_to_save = {"version": "2.3", "parameters": best_params}
+    """최적 파라미터 저장"""
+    data_to_save = {"version": "2.4", "parameters": best_params}
     with open("optimal_params.json", "w") as f:
         json.dump(data_to_save, f)
 
 def main():
-    """Run genetic algorithm"""
+    """유전 알고리즘 실행"""
     global volatility
     try:
         init_process()
     except FileNotFoundError:
-        return  # Exit if files are missing
+        return  # 파일이 없으면 종료
 
     param_ranges = get_dynamic_param_ranges(volatility)
     setup_toolbox(param_ranges)
@@ -403,7 +412,7 @@ def main():
     patience_counter = 0
 
     for gen in tqdm(range(NUM_GENERATIONS), desc="Genetic Algorithm Progress"):
-        offspring = algorithms.varAnd(population, toolbox, cxpb=0.8, mutpb=0.5)  # Increased mutation probability
+        offspring = algorithms.varAnd(population, toolbox, cxpb=0.8, mutpb=0.6)  # 변이 확률 증가
         for ind in offspring:
             clip_individual(ind, param_ranges)
 
@@ -437,7 +446,7 @@ def main():
         "w_short_buy": best_ind[20], "w_short_sell": best_ind[21]
     }
     print("Optimal Parameters:", best_params)
-    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, and Sortino Ratio):", evaluate(best_ind)[0])
+    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, Sortino, and Omega Ratio):", evaluate(best_ind)[0])
 
     save_best_params(best_params)
     pool.close()
