@@ -17,22 +17,24 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from weight_adjustment import get_target_tsll_weight
 
 # 상수 정의
-POPULATION_SIZE = 500  # 인구 크기 증가로 탐색 범위 확대
-NUM_GENERATIONS = 250  # 세대 수 증가로 더 깊은 최적화
-PATIENCE = 30  # 조기 종료 인내심 증가
-TRANSACTION_COST = 0.002  # 거래 비용 0.2% (슬리피지 포함)
+POPULATION_SIZE = 1000  # 탐색 범위 확대
+NUM_GENERATIONS = 300  # 최적화 심화
+PATIENCE = 50  # 조기 종료 인내심 증가
+TRANSACTION_COST = 0.003  # 거래 비용 현실화 (0.3%)
+MAX_POSITION_SIZE = 0.8  # 최대 포지션 크기 제한 (80%)
+STOP_LOSS_THRESHOLD = -0.05  # 손절매 기준 (-5%)
 
 # 전역 변수
 data = None
 volatility = None
 
 # 로깅 설정
-logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_and_preprocess_data(file_path, date_column='Date', volume_column='Volume', header=0, names=None):
     """CSV 파일 로드 및 전처리"""
     if not os.path.exists(file_path):
-        error_message = f"Error: '{file_path}' file not found. Please run 'collect_market_data.py' to generate the required data files."
+        error_message = f"Error: '{file_path}' file not found."
         print(error_message)
         logging.error(error_message)
         raise FileNotFoundError(error_message)
@@ -90,7 +92,7 @@ def calculate_atr(df, timeperiod=14):
     return tr.rolling(window=timeperiod).mean().interpolate(method='linear')
 
 def calculate_stochastic(df, k_period=14, d_period=3):
-    """스토캐스틱 오실레이터 계산"""
+    """스토캐스틱 계산"""
     low_min = df['Low_TSLA'].rolling(window=k_period).min()
     high_max = df['High_TSLA'].rolling(window=k_period).max()
     k = 100 * ((df['Close_TSLA'] - low_min) / (high_max - low_min))
@@ -119,44 +121,30 @@ def calculate_sortino_ratio(returns, risk_free_rate=0.0):
     downside_returns = returns[returns < 0]
     expected_return = np.mean(returns)
     downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else 0
-    sortino_ratio = (expected_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
-    return sortino_ratio
+    return (expected_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
 
-def calculate_omega_ratio(returns, threshold=0.0):
-    """Omega Ratio 계산"""
-    excess_returns = returns - threshold
-    positive_returns = excess_returns[excess_returns > 0].sum()
-    negative_returns = -excess_returns[excess_returns < 0].sum()
-    omega_ratio = positive_returns / negative_returns if negative_returns > 0 else 1e6  # 유한한 큰 값으로 설정
-    return omega_ratio
-
-def calculate_sterling_ratio(returns, max_drawdown):
-    """Sterling Ratio 계산"""
-    avg_annual_return = np.mean(returns) * 252  # 연평균 수익률 (252 거래일 가정)
-    sterling_ratio = avg_annual_return / abs(max_drawdown) if max_drawdown < 0 else 1e6  # 유한한 큰 값으로 설정
-    return sterling_ratio
+def calculate_calmar_ratio(total_return, max_drawdown):
+    """Calmar Ratio 계산"""
+    return total_return / abs(max_drawdown) if max_drawdown < 0 else 1e6
 
 def calculate_max_drawdown(portfolio_values):
     """최대 손실 계산"""
     peak = np.maximum.accumulate(portfolio_values)
     drawdowns = (peak - portfolio_values) / peak
-    return -np.max(drawdowns) if len(drawdowns) > 0 else 0  # 음수 값으로 반환
+    return -np.max(drawdowns) if len(drawdowns) > 0 else 0
 
 def calculate_fitness(portfolio_values):
-    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega, Sterling Ratio 가중합)"""
+    """피트니스 함수 개선"""
     returns = np.diff(portfolio_values) / portfolio_values[:-1]
     mean_return = np.mean(returns)
     std_dev = np.std(returns)
     sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
     max_drawdown = calculate_max_drawdown(portfolio_values)
     total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
-    calmar_ratio = total_return / abs(max_drawdown) if max_drawdown < 0 else 1e6  # 유한한 큰 값으로 설정
+    calmar_ratio = calculate_calmar_ratio(total_return, max_drawdown)
     sortino_ratio = calculate_sortino_ratio(returns)
-    omega_ratio = calculate_omega_ratio(returns)
-    sterling_ratio = calculate_sterling_ratio(returns, max_drawdown)
-    # 가중치 조정: Total Return, Sortino, Omega, Sterling 강조
-    fitness = (0.1 * sharpe_ratio + 0.1 * calmar_ratio + 0.2 * total_return + 
-               0.2 * sortino_ratio + 0.2 * omega_ratio + 0.2 * sterling_ratio)
+    # 하방 리스크와 수익률 강조
+    fitness = (0.1 * sharpe_ratio + 0.3 * calmar_ratio + 0.3 * total_return + 0.3 * sortino_ratio)
     return fitness
 
 def init_process():
@@ -168,7 +156,7 @@ def init_process():
         tsll_df = load_and_preprocess_data('TSLL-history-2y.csv')
         vix_df = load_and_preprocess_data('VIX-history-2y.csv', date_column='Date', volume_column=None, header=3, names=['Date', 'Close'])
     except FileNotFoundError:
-        sys.exit(1)  # 파일이 없으면 스크립트 종료
+        sys.exit(1)
 
     data = merge_dataframes(tsla_df, tsll_df, fear_greed_df)
 
@@ -188,7 +176,7 @@ def init_process():
     data['SMA5_TSLA'] = calculate_sma(data['Close_TSLA'], 5)
     data['SMA10_TSLA'] = calculate_sma(data['Close_TSLA'], 10)
     data['RSI5_TSLA'] = calculate_rsi(data['Close_TSLA'], 5)
-    data['MACD_short_TSLA'], data['MACD_signal_short_TSLA'], data['MACD_histogram_short_TSLA'] = calculate_macd(data['Close_TSLA'], 5, 35, 5)
+    data['MACD_short_TSLA'], data['MACD_signal_short_TSLA'], _ = calculate_macd(data['Close_TSLA'], 5, 35, 5)
     data['VWAP_TSLA'] = calculate_vwap(data)
     weekly_rsi = calculate_rsi(data['Close_TSLA'].resample('W').last(), 14)
     data['Weekly RSI_TSLA'] = weekly_rsi.reindex(data.index, method='ffill').fillna(50)
@@ -201,9 +189,7 @@ def get_volatility_for_backtest(data):
         vix_df = pd.read_csv('VIX-history-2y.csv', skiprows=3, header=None, names=['Date', 'VIX'],
                              parse_dates=['Date'], index_col='Date')
     except FileNotFoundError:
-        error_message = "Error: 'VIX-history-2y.csv' file not found. Please run 'collect_market_data.py' to generate the required data files."
-        print(error_message)
-        logging.error(error_message)
+        logging.error("VIX file not found.")
         sys.exit(1)
     
     start_date = data.index.min()
@@ -213,98 +199,53 @@ def get_volatility_for_backtest(data):
     return vix_filtered['VIX'].mean()
 
 def get_dynamic_param_ranges(volatility):
-    """변동성에 따라 파라미터 범위 설정 (공격적으로 조정)"""
-    if volatility > 30:  # 높은 변동성 환경
+    """변동성 기반 동적 파라미터 범위"""
+    if volatility > 30:  # 고변동성 환경
         return [
-            (5, 30), (70, 95), (10, 30), (70, 90), (10, 30), (70, 90),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
-            (0.5, 2.5), (0.2, 1.2), (-1.2, -0.2),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell (범위 확장)
-            (2.5, 5.5), (1.5, 3.5), (2.0, 4.5),  # w_strong_buy, w_weak_buy, w_sell (매도 가중치 상향)
-            (10, 30), (80, 95),  # stochastic_buy, stochastic_sell
-            (0.5, 3.0), (1.0, 4.0),  # obv_weight, bb_width_weight
-            (10, 30), (70, 90),  # short_rsi_buy, short_rsi_sell
-            (0.05, 0.35), (0.3, 0.6),  # bb_width_low, bb_width_high (범위 확장)
-            (1.5, 3.5), (1.5, 3.5)  # w_short_buy, w_short_sell (단기 매도 가중치 상향)
+            (10, 35), (65, 90), (15, 35), (65, 85), (20, 40), (60, 80),  # fg_buy, fg_sell, daily_rsi_buy, daily_rsi_sell, weekly_rsi_buy, weekly_rsi_sell
+            (0.6, 2.0), (0.2, 1.0), (-1.0, -0.3),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell
+            (2.0, 4.0), (1.0, 2.5), (1.5, 3.5),  # w_strong_buy, w_weak_buy, w_sell
+            (15, 30), (75, 90),  # stochastic_buy, stochastic_sell
+            (0.5, 2.0), (0.5, 2.0),  # obv_weight, bb_width_weight
+            (20, 35), (65, 80),  # short_rsi_buy, short_rsi_sell
+            (0.1, 0.3), (0.25, 0.5),  # bb_width_low, bb_width_high
+            (1.0, 2.5), (1.0, 2.5)  # w_short_buy, w_short_sell
         ]
-    return [  # 낮은 변동성 환경
-        (15, 40), (60, 90), (15, 35), (65, 85), (15, 35), (65, 85),
-        (0.4, 1.8), (0.1, 0.9), (-0.9, -0.1),  # volume_change_strong_buy, volume_change_weak_buy, volume_change_sell (범위 확장)
-        (2.0, 4.5), (1.0, 3.0), (1.5, 3.5),  # w_strong_buy, w_weak_buy, w_sell (매도 가중치 상향)
-        (15, 35), (75, 90),
-        (0.5, 2.5), (0.5, 2.5),
-        (15, 35), (65, 85),
-        (0.05, 0.3), (0.25, 0.5),  # bb_width_low, bb_width_high (범위 확장)
-        (1.0, 3.0), (1.0, 3.0)  # w_short_buy, w_short_sell (단기 매도 가중치 상향)
-    ]
+    else:  # 저변동성 환경
+        return [
+            (15, 40), (60, 85), (20, 40), (60, 80), (25, 45), (55, 75),
+            (0.4, 1.5), (0.1, 0.8), (-0.8, -0.1),
+            (1.5, 3.5), (0.8, 2.0), (1.0, 3.0),
+            (20, 35), (70, 85),
+            (0.3, 1.5), (0.3, 1.5),
+            (25, 40), (60, 75),
+            (0.05, 0.2), (0.15, 0.4),
+            (0.8, 2.0), (0.8, 2.0)
+        ]
 
-def get_rsi_trend(rsi_series, window=10):
-    """RSI 추세 분석"""
-    if len(rsi_series) < window:
-        return "Stable"
-    slope, _, _, _, _ = linregress(range(window), rsi_series[-window:])
-    return "Increasing" if slope > 0.1 else "Decreasing" if slope < -0.1 else "Stable"
-
-def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row):
-    """포트폴리오 조정"""
-    total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
-    required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
-    required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
-
-    if required_tsla_shares > holdings['TSLA']:
-        buy_shares = required_tsla_shares - holdings['TSLA']
-        cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
-        if cash >= cost:
-            cash -= cost
-            holdings['TSLA'] += buy_shares
-    elif required_tsla_shares < holdings['TSLA']:
-        sell_shares = holdings['TSLA'] - required_tsla_shares
-        proceeds = sell_shares * row['Close_TSLA'] * (1 - TRANSACTION_COST)
-        cash += proceeds
-        holdings['TSLA'] -= sell_shares
-
-    if required_tsll_shares > holdings['TSLL']:
-        buy_shares = required_tsll_shares - holdings['TSLL']
-        cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
-        if cash >= cost:
-            cash -= cost
-            holdings['TSLL'] += buy_shares
-    elif required_tsll_shares < holdings['TSLL']:
-        sell_shares = holdings['TSLL'] - required_tsll_shares
-        proceeds = sell_shares * row['Close_TSLL'] * (1 - TRANSACTION_COST)
-        cash += proceeds
-        holdings['TSLL'] -= sell_shares
-
-    return holdings, cash
-
-def evaluate(individual, data_subset=None):
-    """백테스트 평가"""
-    global data
-    if data_subset is None:
-        data_subset = data
-
+def evaluate_individual(individual, fold_data):
+    """개별 파라미터 평가"""
     params = {
-        "fg_buy": individual[0], "fg_sell": individual[1], "daily_rsi_buy": individual[2],
-        "daily_rsi_sell": individual[3], "weekly_rsi_buy": individual[4], "weekly_rsi_sell": individual[5],
-        "volume_change_strong_buy": individual[6], "volume_change_weak_buy": individual[7],
-        "volume_change_sell": individual[8], "w_strong_buy": individual[9], "w_weak_buy": individual[10],
-        "w_sell": individual[11], "stochastic_buy": individual[12], "stochastic_sell": individual[13],
-        "obv_weight": individual[14], "bb_width_weight": individual[15],
-        "short_rsi_buy": individual[16], "short_rsi_sell": individual[17],
-        "bb_width_low": individual[18], "bb_width_high": individual[19],
-        "w_short_buy": individual[20], "w_short_sell": individual[21]
+        "fg_buy": individual[0], "fg_sell": individual[1], "daily_rsi_buy": individual[2], "daily_rsi_sell": individual[3],
+        "weekly_rsi_buy": individual[4], "weekly_rsi_sell": individual[5], "volume_change_strong_buy": individual[6],
+        "volume_change_weak_buy": individual[7], "volume_change_sell": individual[8], "w_strong_buy": individual[9],
+        "w_weak_buy": individual[10], "w_sell": individual[11], "stochastic_buy": individual[12], "stochastic_sell": individual[13],
+        "obv_weight": individual[14], "bb_width_weight": individual[15], "short_rsi_buy": individual[16], "short_rsi_sell": individual[17],
+        "bb_width_low": individual[18], "bb_width_high": individual[19], "w_short_buy": individual[20], "w_short_sell": individual[21]
     }
 
     cash = 100000
     holdings = {'TSLA': 0, 'TSLL': 0}
     current_tsll_weight = 0.0
+    prev_target_tsll_weight = -1.0
     portfolio_values = []
-    reasons_collector = []
 
-    for i in range(1, len(data_subset)):
-        row = data_subset.iloc[i]
+    for i in range(len(fold_data)):
+        row = fold_data.iloc[i]
         fear_greed = row['y']
         daily_rsi = row['RSI_TSLA']
         weekly_rsi = row['Weekly RSI_TSLA']
-        daily_rsi_trend = get_rsi_trend(data_subset['RSI_TSLA'].iloc[max(0, i-10):i+1])
+        daily_rsi_trend = "Stable" if i < 10 else linregress(range(10), fold_data['RSI_TSLA'].iloc[i-10:i])[0] > 0 and "Increasing" or "Decreasing"
         close = row['Close_TSLA']
         sma5 = row['SMA5_TSLA']
         sma10 = row['SMA10_TSLA']
@@ -320,140 +261,136 @@ def evaluate(individual, data_subset=None):
         stochastic_k = row['Stochastic_K_TSLA']
         stochastic_d = row['Stochastic_D_TSLA']
         obv = row['OBV_TSLA']
-        obv_prev = data_subset['OBV_TSLA'].iloc[i-1] if i > 0 else obv
+        obv_prev = fold_data['OBV_TSLA'].iloc[i-1] if i > 0 else obv
         bb_width = row['BB_width_TSLA']
         rsi5 = row['RSI5_TSLA']
         macd_short = row['MACD_short_TSLA']
         macd_signal_short = row['MACD_signal_short_TSLA']
         vwap = row['VWAP_TSLA']
 
-        target_tsll_weight, reasons = get_target_tsll_weight(
+        target_tsll_weight, _ = get_target_tsll_weight(
             fear_greed, daily_rsi, weekly_rsi, daily_rsi_trend, close, sma5, sma10, sma50, sma200, macd, macd_signal, macd_histogram,
             volume_change, atr, lower_band, upper_band, stochastic_k, stochastic_d, obv, obv_prev, bb_width, rsi5, macd_short, macd_signal_short, vwap,
             current_tsll_weight, params, row.name.strftime('%Y-%m-%d')
         )
+        target_tsll_weight = min(target_tsll_weight, MAX_POSITION_SIZE)  # 최대 포지션 크기 제한
         target_tsla_weight = 1 - target_tsll_weight
 
-        holdings, cash = adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row)
+        if abs(target_tsll_weight - prev_target_tsll_weight) > 0.01:
+            total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
+            if total_value / 100000 - 1 < STOP_LOSS_THRESHOLD:  # 손절매
+                cash += holdings['TSLA'] * row['Close_TSLA'] * (1 - TRANSACTION_COST) + holdings['TSLL'] * row['Close_TSLL'] * (1 - TRANSACTION_COST)
+                holdings['TSLA'], holdings['TSLL'] = 0, 0
+            else:
+                required_tsll_shares = int((target_tsll_weight * total_value) / row['Close_TSLL'])
+                required_tsla_shares = int((target_tsla_weight * total_value) / row['Close_TSLA'])
+
+                if required_tsll_shares < holdings['TSLL']:
+                    sell_shares = holdings['TSLL'] - required_tsll_shares
+                    cash += sell_shares * row['Close_TSLL'] * (1 - TRANSACTION_COST)
+                    holdings['TSLL'] -= sell_shares
+                elif required_tsll_shares > holdings['TSLL']:
+                    buy_shares = required_tsll_shares - holdings['TSLL']
+                    cost = buy_shares * row['Close_TSLL'] * (1 + TRANSACTION_COST)
+                    if cash >= cost:
+                        cash -= cost
+                        holdings['TSLL'] += buy_shares
+
+                if required_tsla_shares < holdings['TSLA']:
+                    sell_shares = holdings['TSLA'] - required_tsla_shares
+                    cash += sell_shares * row['Close_TSLA'] * (1 - TRANSACTION_COST)
+                    holdings['TSLA'] -= sell_shares
+                elif required_tsla_shares > holdings['TSLA']:
+                    buy_shares = required_tsla_shares - holdings['TSLA']
+                    cost = buy_shares * row['Close_TSLA'] * (1 + TRANSACTION_COST)
+                    if cash >= cost:
+                        cash -= cost
+                        holdings['TSLA'] += buy_shares
+
+            prev_target_tsll_weight = target_tsll_weight
+
         total_value = holdings['TSLA'] * row['Close_TSLA'] + holdings['TSLL'] * row['Close_TSLL'] + cash
-        portfolio_values.append(total_value)
         current_tsll_weight = (holdings['TSLL'] * row['Close_TSLL']) / total_value if total_value > 0 else 0
-        reasons_collector.append(reasons)
+        portfolio_values.append(total_value)
 
-    final_value = holdings['TSLA'] * data_subset['Close_TSLA'].iloc[-1] + holdings['TSLL'] * data_subset['Close_TSLL'].iloc[-1] + cash
-    portfolio_values.append(final_value)
+    return calculate_fitness(np.array(portfolio_values)),
 
-    fitness = calculate_fitness(portfolio_values)
-    return fitness,
+def optimize_parameters():
+    """파라미터 최적화"""
+    init_process()
+    param_ranges = get_dynamic_param_ranges(volatility)
 
-creator.create("FitnessMax", base.Fitness, weights=(1.0,))
-creator.create("Individual", list, fitness=creator.FitnessMax)
+    # DEAP 설정
+    creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+    creator.create("Individual", list, fitness=creator.FitnessMax)
 
-toolbox = base.Toolbox()
+    toolbox = base.Toolbox()
+    toolbox.register("attr_float", lambda r: random.uniform(r[0], r[1]))
+    toolbox.register("individual", tools.initCycle, creator.Individual,
+                     [lambda: toolbox.attr_float(r) for r in param_ranges], n=1)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
-def clip_individual(ind, param_ranges):
-    """파라미터 범위 클리핑"""
-    for i in range(len(ind)):
-        low, high = param_ranges[i]
-        ind[i] = max(low, min(ind[i], high))
-    return ind
-
-def cross_validation_evaluation(individual, folds=20):  # 교차 검증 fold 수 증가
-    """Time Series Split 교차 검증"""
-    global data
-    tscv = TimeSeriesSplit(n_splits=folds)
+    # 교차 검증 설정
+    tscv = TimeSeriesSplit(n_splits=5)
     fitness_scores = []
 
     for train_idx, test_idx in tscv.split(data):
+        train_data = data.iloc[train_idx]
         test_data = data.iloc[test_idx]
-        fitness = evaluate(individual, test_data)[0]
-        fitness_scores.append(fitness)
 
-    return np.mean(fitness_scores),
+        def eval_with_fold(individual):
+            return evaluate_individual(individual, test_data)
 
-def setup_toolbox(param_ranges):
-    """DEAP 툴박스 설정"""
-    for i, (low, high) in enumerate(param_ranges):
-        toolbox.register(f"attr_{i}", random.uniform, low, high)
+        toolbox.register("evaluate", eval_with_fold)
+        toolbox.register("mate", tools.cxBlend, alpha=0.5)
+        toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=1, indpb=0.2)
+        toolbox.register("select", tools.selTournament, tournsize=3)
 
-    toolbox.register("individual", tools.initCycle, creator.Individual,
-                     [toolbox.attr_0, toolbox.attr_1, toolbox.attr_2, toolbox.attr_3,
-                      toolbox.attr_4, toolbox.attr_5, toolbox.attr_6, toolbox.attr_7,
-                      toolbox.attr_8, toolbox.attr_9, toolbox.attr_10, toolbox.attr_11,
-                      toolbox.attr_12, toolbox.attr_13, toolbox.attr_14, toolbox.attr_15,
-                      toolbox.attr_16, toolbox.attr_17, toolbox.attr_18, toolbox.attr_19,
-                      toolbox.attr_20, toolbox.attr_21], n=1)
-    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("evaluate", cross_validation_evaluation)
-    toolbox.register("mate", tools.cxBlend, alpha=0.5)
-    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.5)  # 변이 확률 증가
-    toolbox.register("select", tools.selTournament, tournsize=7)  # 선택 압력 강화
+        population = toolbox.population(n=POPULATION_SIZE)
+        stats = tools.Statistics(lambda ind: ind.fitness.values)
+        stats.register("avg", np.mean)
+        stats.register("max", np.max)
 
-def save_best_params(best_params):
-    """최적 파라미터 저장"""
-    data_to_save = {"version": "2.5", "parameters": best_params}
+        best_fitness = -np.inf
+        patience_counter = 0
+
+        for gen in tqdm(range(NUM_GENERATIONS), desc="Generation"):
+            offspring = algorithms.varAnd(population, toolbox, cxpb=0.7, mutpb=0.3)
+            fits = list(map(toolbox.evaluate, offspring))
+            for fit, ind in zip(fits, offspring):
+                ind.fitness.values = fit
+
+            population = toolbox.select(offspring, k=len(population))
+            top_fitness = max([ind.fitness.values[0] for ind in population])
+            if top_fitness > best_fitness:
+                best_fitness = top_fitness
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            if patience_counter >= PATIENCE:
+                break
+
+        best_ind = tools.selBest(population, k=1)[0]
+        fitness_scores.append(best_ind.fitness.values[0])
+
+    # 최종 최적 파라미터
+    best_population = toolbox.population(n=POPULATION_SIZE)
+    fits = list(map(lambda ind: evaluate_individual(ind, data), best_population))
+    for fit, ind in zip(fits, best_population):
+        ind.fitness.values = fit
+    best_individual = tools.selBest(best_population, k=1)[0]
+
+    param_names = ["fg_buy", "fg_sell", "daily_rsi_buy", "daily_rsi_sell", "weekly_rsi_buy", "weekly_rsi_sell",
+                   "volume_change_strong_buy", "volume_change_weak_buy", "volume_change_sell", "w_strong_buy",
+                   "w_weak_buy", "w_sell", "stochastic_buy", "stochastic_sell", "obv_weight", "bb_width_weight",
+                   "short_rsi_buy", "short_rsi_sell", "bb_width_low", "bb_width_high", "w_short_buy", "w_short_sell"]
+    optimal_params = dict(zip(param_names, best_individual))
+
     with open("optimal_params.json", "w") as f:
-        json.dump(data_to_save, f)
+        json.dump({"version": "2.1", "parameters": optimal_params}, f, indent=4)
 
-def main():
-    """유전 알고리즘 실행"""
-    global volatility
-    try:
-        init_process()
-    except FileNotFoundError:
-        return  # 파일이 없으면 종료
-
-    param_ranges = get_dynamic_param_ranges(volatility)
-    setup_toolbox(param_ranges)
-
-    processes = min(cpu_count(), 4)
-    pool = Pool(processes=processes, initializer=init_process)
-    toolbox.register("map", pool.map)
-
-    population = toolbox.population(n=POPULATION_SIZE)
-    best_fitness = -np.inf
-    patience_counter = 0
-
-    for gen in tqdm(range(NUM_GENERATIONS), desc="Genetic Algorithm Progress"):
-        offspring = algorithms.varAnd(population, toolbox, cxpb=0.8, mutpb=0.6)  # 변이 확률 증가
-        for ind in offspring:
-            clip_individual(ind, param_ranges)
-
-        fits = toolbox.map(toolbox.evaluate, offspring)
-        for fit, ind in zip(fits, offspring):
-            ind.fitness.values = fit
-
-        population = toolbox.select(offspring, k=len(population))
-
-        current_best = max(population, key=lambda ind: ind.fitness.values[0]).fitness.values[0]
-        if current_best > best_fitness:
-            best_fitness = current_best
-            patience_counter = 0
-        else:
-            patience_counter += 1
-
-        if patience_counter >= PATIENCE:
-            print(f"Early stopping at generation {gen}: No improvement for {PATIENCE} generations")
-            break
-
-    best_ind = tools.selBest(population, 1)[0]
-    best_params = {
-        "fg_buy": best_ind[0], "fg_sell": best_ind[1], "daily_rsi_buy": best_ind[2],
-        "daily_rsi_sell": best_ind[3], "weekly_rsi_buy": best_ind[4], "weekly_rsi_sell": best_ind[5],
-        "volume_change_strong_buy": best_ind[6], "volume_change_weak_buy": best_ind[7],
-        "volume_change_sell": best_ind[8], "w_strong_buy": best_ind[9], "w_weak_buy": best_ind[10],
-        "w_sell": best_ind[11], "stochastic_buy": best_ind[12], "stochastic_sell": best_ind[13],
-        "obv_weight": best_ind[14], "bb_width_weight": best_ind[15],
-        "short_rsi_buy": best_ind[16], "short_rsi_sell": best_ind[17],
-        "bb_width_low": best_ind[18], "bb_width_high": best_ind[19],
-        "w_short_buy": best_ind[20], "w_short_sell": best_ind[21]
-    }
-    print("Optimal Parameters:", best_params)
-    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, Sortino, Omega, and Sterling Ratio):", evaluate(best_ind)[0])
-
-    save_best_params(best_params)
-    pool.close()
-    pool.join()
+    print("Optimal Parameters:", optimal_params)
+    print("Maximum Fitness (Weighted Sharpe, Calmar, Total Return, Sortino):", best_individual.fitness.values[0])
 
 if __name__ == "__main__":
-    main()
+    optimize_parameters()
