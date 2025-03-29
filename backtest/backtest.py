@@ -127,14 +127,37 @@ def calculate_omega_ratio(returns, threshold=0.0):
     excess_returns = returns - threshold
     positive_returns = excess_returns[excess_returns > 0].sum()
     negative_returns = -excess_returns[excess_returns < 0].sum()
-    omega_ratio = positive_returns / negative_returns if negative_returns > 0 else float('inf')
+    omega_ratio = positive_returns / negative_returns if negative_returns > 0 else 1e6  # 유한한 큰 값으로 설정
     return omega_ratio
 
 def calculate_sterling_ratio(returns, max_drawdown):
     """Sterling Ratio 계산"""
     avg_annual_return = np.mean(returns) * 252  # 연평균 수익률 (252 거래일 가정)
-    sterling_ratio = avg_annual_return / abs(max_drawdown) if max_drawdown < 0 else float('inf')
+    sterling_ratio = avg_annual_return / abs(max_drawdown) if max_drawdown < 0 else 1e6  # 유한한 큰 값으로 설정
     return sterling_ratio
+
+def calculate_max_drawdown(portfolio_values):
+    """최대 손실 계산"""
+    peak = np.maximum.accumulate(portfolio_values)
+    drawdowns = (peak - portfolio_values) / peak
+    return -np.max(drawdowns) if len(drawdowns) > 0 else 0  # 음수 값으로 반환
+
+def calculate_fitness(portfolio_values):
+    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega, Sterling Ratio 가중합)"""
+    returns = np.diff(portfolio_values) / portfolio_values[:-1]
+    mean_return = np.mean(returns)
+    std_dev = np.std(returns)
+    sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
+    max_drawdown = calculate_max_drawdown(portfolio_values)
+    total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
+    calmar_ratio = total_return / abs(max_drawdown) if max_drawdown < 0 else 1e6  # 유한한 큰 값으로 설정
+    sortino_ratio = calculate_sortino_ratio(returns)
+    omega_ratio = calculate_omega_ratio(returns)
+    sterling_ratio = calculate_sterling_ratio(returns, max_drawdown)
+    # 가중치 조정: Total Return, Sortino, Omega, Sterling 강조
+    fitness = (0.1 * sharpe_ratio + 0.1 * calmar_ratio + 0.2 * total_return + 
+               0.2 * sortino_ratio + 0.2 * omega_ratio + 0.2 * sterling_ratio)
+    return fitness
 
 def init_process():
     """데이터 초기화 및 지표 계산"""
@@ -252,21 +275,6 @@ def adjust_portfolio(holdings, cash, target_tsla_weight, target_tsll_weight, row
 
     return holdings, cash
 
-def calculate_fitness(portfolio_values):
-    """피트니스 스코어 계산 (Sharpe, Calmar, Total Return, Sortino, Omega, Sterling Ratio 가중합)"""
-    returns = np.diff(portfolio_values) / portfolio_values[:-1]
-    mean_return = np.mean(returns)
-    std_dev = np.std(returns)
-    sharpe_ratio = mean_return / std_dev if std_dev > 0 else 0
-    max_drawdown = calculate_max_drawdown(portfolio_values)
-    total_return = (portfolio_values[-1] - portfolio_values[0]) / portfolio_values[0]
-    calmar_ratio = total_return / max_drawdown if max_drawdown > 0 else 0
-    sortino_ratio = calculate_sortino_ratio(returns)
-    omega_ratio = calculate_omega_ratio(returns)
-    sterling_ratio = calculate_sterling_ratio(returns, max_drawdown)
-    # 가중치 조정: Total Return, Sortino, Omega, Sterling 강조
-    return 0.1 * sharpe_ratio + 0.1 * calmar_ratio + 0.2 * total_return + 0.2 * sortino_ratio + 0.2 * omega_ratio + 0.2 * sterling_ratio
-
 def evaluate(individual, data_subset=None):
     """백테스트 평가"""
     global data
@@ -337,18 +345,6 @@ def evaluate(individual, data_subset=None):
 
     fitness = calculate_fitness(portfolio_values)
     return fitness,
-
-def calculate_max_drawdown(portfolio_values):
-    """최대 손실 계산"""
-    peak = portfolio_values[0]
-    max_drawdown = 0
-    for value in portfolio_values:
-        if value > peak:
-            peak = value
-        drawdown = (peak - value) / peak
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
-    return max_drawdown
 
 creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMax)
